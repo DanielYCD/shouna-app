@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>家居收纳管家</title>
+<meta name="theme-color" content="#3ECF8E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="收纳管家">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --primary: #3ECF8E; --primary-dark: #2BA876; --primary-light: #E8F9F0;
+  --success: #1D9E75; --success-light: #E1F5EE;
+  --danger: #E24B4A; --danger-light: #FCEBEB;
+  --amber: #BA7517; --amber-light: #FAEEDA;
+  --text: #2C2C2A; --text2: #5F5E5A;
+  --border: rgba(0,0,0,0.12); --bg: #F8F7F4; --card: #fff; --radius: 12px;
+}
+body { font-family: -apple-system,'PingFang SC','Helvetica Neue',sans-serif;
+  background:var(--bg); color:var(--text); font-size:14px; min-height:100vh; }
+
+/* 导航 */
+.nav { background:var(--card); border-bottom:0.5px solid var(--border);
+  position:sticky; top:0; z-index:100; }
+.nav-title { font-size:17px; font-weight:500; padding:14px 16px 6px; display:flex;
+  align-items:center; justify-content:space-between; }
+.nav-tabs { display:flex; padding:0 8px; }
+.nav-tab { flex:1; padding:10px 4px; text-align:center; font-size:13px;
+  color:var(--text2); border-bottom:2.5px solid transparent; cursor:pointer; transition:all .2s; }
+.nav-tab.active { color:var(--primary-dark); border-bottom-color:var(--primary); font-weight:500; }
+
+/* 页面 */
+.page { display:none; padding:16px; min-height:calc(100vh - 100px); }
+.page.active { display:block; }
+
+/* 卡片 */
+.card { background:var(--card); border-radius:var(--radius);
+  border:0.5px solid var(--border); padding:16px; margin-bottom:12px; }
+
+/* 按钮 */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  padding:10px 18px; border-radius:8px; border:0.5px solid var(--border);
+  font-size:14px; cursor:pointer; font-family:inherit; transition:all .15s;
+  background:var(--card); color:var(--text); }
+.btn-primary { background:var(--primary); color:#fff; border-color:var(--primary); }
+.btn-primary:hover { background:var(--primary-dark); }
+.btn-success { background:var(--success); color:#fff; border-color:var(--success); }
+.btn-danger { background:var(--danger-light); color:var(--danger); border-color:var(--danger); }
+.btn-ghost { background:transparent; border:none; color:var(--text2); padding:8px 10px; }
+.btn:active { opacity:.8; transform:scale(.98); }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+
+/* 表单 */
+input,select,textarea {
+  width:100%; padding:12px 14px; border-radius:8px;
+  border:0.5px solid var(--border); background:var(--bg);
+  font-size:14px; font-family:inherit; color:var(--text); outline:none; transition:border .15s;
+}
+input:focus,select:focus,textarea:focus { border-color:var(--primary); background:#fff; }
+label { display:block; font-size:13px; color:var(--text2); margin-bottom:6px; margin-top:14px; }
+label:first-child { margin-top:0; }
+textarea { resize:vertical; min-height:72px; }
+
+/* 户型图 */
+.floor-wrap { position:relative; width:100%; overflow:hidden;
+  border-radius:8px; border:0.5px solid var(--border); background:#f0ede8;
+  cursor:crosshair; touch-action:none; }
+.floor-wrap img { width:100%; display:block; pointer-events:none; user-select:none; }
+.floor-placeholder { width:100%; height:220px; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:10px;
+  color:var(--text2); font-size:13px; cursor:pointer; }
+.floor-ph-icon { width:48px; height:48px; background:var(--primary-light);
+  border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:22px; }
+
+/* 标记点 */
+.marker { position:absolute; transform:translate(-50%,-50%);
+  width:26px; height:26px; cursor:pointer; z-index:10; }
+.marker-dot { width:16px; height:16px; border-radius:50%;
+  background:var(--primary-dark); border:2.5px solid #fff; margin:5px;
+  box-shadow:0 1px 4px rgba(0,0,0,.25); transition:transform .15s; }
+.marker:hover .marker-dot, .marker.active .marker-dot { transform:scale(1.4); background:var(--amber); }
+.marker-label { position:absolute; top:-22px; left:50%; transform:translateX(-50%);
+  background:var(--primary-dark); color:#fff; font-size:11px; padding:2px 7px;
+  border-radius:4px; white-space:nowrap; pointer-events:none; opacity:0;
+  transition:opacity .15s; max-width:90px; overflow:hidden; text-overflow:ellipsis; }
+.marker.active .marker-label, .marker:hover .marker-label { opacity:1; }
+.marker-pending .marker-dot { background:var(--amber); animation:pulse .8s infinite; }
+@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.3)} }
+
+/* 物品列表 */
+.item-list { display:flex; flex-direction:column; gap:10px; }
+.item-card { background:var(--card); border-radius:var(--radius);
+  border:0.5px solid var(--border); display:flex; align-items:center;
+  gap:12px; padding:12px 14px; cursor:pointer; transition:border-color .15s; }
+.item-card:hover, .item-card.highlight { border-color:var(--primary); }
+.item-card.highlight { background:var(--primary-light); }
+.item-thumb { width:48px; height:48px; border-radius:8px; background:var(--bg);
+  border:0.5px solid var(--border); flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:22px; overflow:hidden; }
+.item-thumb img { width:100%; height:100%; object-fit:cover; }
+.item-info { flex:1; min-width:0; }
+.item-name { font-size:15px; font-weight:500; }
+.item-meta { font-size:12px; color:var(--text2); margin-top:3px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:500; }
+.tag-primary { background:var(--primary-light); color:var(--primary-dark); }
+.tag-success { background:var(--success-light); color:var(--success); }
+.tag-amber { background:var(--amber-light); color:var(--amber); }
+
+/* 搜索 */
+.search-wrap { position:relative; margin-bottom:14px; }
+.search-wrap input { padding-left:38px; }
+.search-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%);
+  font-size:16px; pointer-events:none; }
+
+/* 抽屉 */
+.overlay { position:fixed; inset:0; background:rgba(0,0,0,.35);
+  z-index:200; opacity:0; pointer-events:none; transition:opacity .25s; }
+.overlay.show { opacity:1; pointer-events:all; }
+.drawer { position:fixed; bottom:0; left:0; right:0; background:var(--card);
+  border-radius:20px 20px 0 0; z-index:201; padding:0 20px 36px;
+  transform:translateY(100%); transition:transform .3s cubic-bezier(.4,0,.2,1);
+  max-height:92vh; overflow-y:auto; }
+.drawer.show { transform:translateY(0); }
+.drawer-handle { width:36px; height:4px; background:var(--border);
+  border-radius:2px; margin:14px auto 20px; }
+.drawer-title { font-size:17px; font-weight:500; margin-bottom:18px; }
+
+/* 照片上传 */
+.photo-upload { width:80px; height:80px; border-radius:10px;
+  border:1.5px dashed var(--border); display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  color:var(--text2); cursor:pointer; position:relative; overflow:hidden; }
+.photo-upload input { display:none; }
+
+/* 空状态 */
+.empty { text-align:center; padding:60px 20px; color:var(--text2); font-size:13px; }
+.empty-icon { font-size:40px; margin-bottom:12px; }
+
+/* Toast */
+.toast { position:fixed; top:80px; left:50%; transform:translateX(-50%) translateY(-10px);
+  background:#2C2C2A; color:#fff; padding:10px 20px; border-radius:100px;
+  font-size:13px; z-index:999; opacity:0; transition:all .3s; pointer-events:none; white-space:nowrap; }
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* 图例 */
+.legend { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.legend-item { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--text2); }
+.legend-dot { width:10px; height:10px; border-radius:50%; background:var(--primary-dark); }
+
+/* 分类 */
+.cat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:6px; }
+.cat-btn { padding:10px 4px; border-radius:8px; border:0.5px solid var(--border);
+  text-align:center; font-size:12px; cursor:pointer; background:var(--bg);
+  transition:all .15s; display:flex; flex-direction:column; align-items:center; gap:4px; }
+.cat-btn.selected { background:var(--primary-light); border-color:var(--primary); color:var(--primary-dark); }
+.cat-btn span:first-child { font-size:20px; }
+
+/* 位置提示 */
+.pos-hint { background:var(--amber-light); border:0.5px solid var(--amber);
+  border-radius:8px; padding:10px 14px; font-size:13px; color:var(--amber); margin-bottom:14px; }
+
+.flex-row { display:flex; gap:10px; align-items:center; }
+.section-title { font-size:13px; font-weight:500; color:var(--text2); margin-bottom:10px; }
+.divider { height:0.5px; background:var(--border); margin:16px 0; }
+
+/* 家庭选择 */
+.family-list { display:flex; flex-direction:column; gap:10px; width:100%; max-width:360px; }
+.family-card { background:var(--card); border-radius:var(--radius); border:0.5px solid var(--border);
+  padding:16px; cursor:pointer; transition:all .15s; display:flex; align-items:center; gap:12px; }
+.family-card:hover { border-color:var(--primary); background:var(--primary-light); }
+.family-card.active { border-color:var(--primary); background:var(--primary-light); }
+
+/* 统计卡片 */
+.stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:16px; }
+.stat-card { background:var(--bg); border-radius:8px; padding:12px 8px; text-align:center; }
+.stat-num { font-size:22px; font-weight:600; color:var(--primary-dark); }
+.stat-label { font-size:11px; color:var(--text2); margin-top:4px; }
+</style>
+</head>
+<body>
+
+<!-- ==================== 主界面 ==================== -->
+<div id="mainApp">
+  <!-- 顶部导航 -->
+  <div class="nav">
+    <div class="nav-title">
+      <span>🏠 家居收纳管家</span>
+      <span id="familyNameBadge" style="font-size:12px;color:var(--text2);font-weight:400;"></span>
+    </div>
+    <div class="nav-tabs">
+      <div class="nav-tab active" data-tab="map" onclick="switchTab('map')">户型图</div>
+      <div class="nav-tab" data-tab="items" onclick="switchTab('items')">物品清单</div>
+      <div class="nav-tab" data-tab="search" onclick="switchTab('search')">搜索</div>
+      <div class="nav-tab" data-tab="mine" onclick="switchTab('mine')">我的</div>
+    </div>
+  </div>
+
+  <!-- 户型图页面 -->
+  <div class="page active" id="page-map">
+    <div class="card">
+      <div class="flex-row" style="justify-content:space-between;margin-bottom:12px;">
+        <div>
+          <div style="font-size:15px;font-weight:500;">家庭户型图</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px;">点击图片标记物品位置</div>
+        </div>
+        <button class="btn btn-primary" onclick="triggerFloorUpload()" style="padding:8px 14px;font-size:13px;">上传图片</button>
+      </div>
+      <input type="file" id="floorInput" accept="image/*" style="display:none" onchange="loadFloorPlan(event)">
+      <div class="floor-wrap" id="floorWrap" onclick="handleFloorClick(event)">
+        <div class="floor-placeholder" id="floorPlaceholder" onclick="triggerFloorUpload()">
+          <div class="floor-ph-icon">🗺️</div>
+          <div>点击上传户型图</div>
+          <div style="font-size:12px;opacity:.6;">支持拍照或相册图片</div>
+        </div>
+      </div>
+      <div class="legend" id="markerLegend" style="display:none">
+        <div class="legend-item"><div class="legend-dot"></div>已标记位置（点击查看）</div>
+        <div class="legend-item" style="margin-left:auto;font-size:12px;color:var(--primary-dark);" id="markerCount"></div>
+      </div>
+    </div>
+    <div class="pos-hint" id="addModeHint" style="display:none">已选择位置，请在下方填写物品信息 ↓</div>
+    <div class="card" id="quickAddCard" style="display:none">
+      <div style="font-size:15px;font-weight:500;margin-bottom:14px">添加物品</div>
+      <div id="quickAddForm"></div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button class="btn" style="flex:1" onclick="cancelAdd()">取消</button>
+        <button class="btn btn-primary" style="flex:2" onclick="confirmAdd()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 物品清单页面 -->
+  <div class="page" id="page-items">
+    <div class="flex-row" style="justify-content:space-between;margin-bottom:14px;">
+      <div>
+        <div style="font-size:15px;font-weight:500;">全部物品</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px;" id="itemCountText">共 0 件</div>
+      </div>
+      <button class="btn btn-primary" onclick="openAddDrawer()" style="padding:8px 14px;font-size:13px;">+ 添加物品</button>
+    </div>
+    <div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:14px;padding-bottom:4px;" id="catFilter"></div>
+    <div class="item-list" id="itemList">
+      <div class="empty"><div class="empty-icon">📦</div><div>还没有物品记录</div></div>
+    </div>
+  </div>
+
+  <!-- 搜索页面 -->
+  <div class="page" id="page-search">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="searchInput" placeholder="搜索物品名称、位置…" oninput="doSearch()" autocomplete="off">
+    </div>
+    <div class="section-title" id="searchHint">输入关键词查找物品</div>
+    <div class="item-list" id="searchList"></div>
+  </div>
+
+  <!-- 我的页面 -->
+  <div class="page" id="page-mine">
+    <div class="card">
+      <div style="font-size:15px;font-weight:500;margin-bottom:14px;">数据概览</div>
+      <div class="stat-grid" id="statGrid">
+        <div class="stat-card"><div class="stat-num" id="statTotal">0</div><div class="stat-label">物品总数</div></div>
+        <div class="stat-card"><div class="stat-num" id="statCats">0</div><div class="stat-label">分类数</div></div>
+        <div class="stat-card"><div class="stat-num" id="statLocated">0</div><div class="stat-label">已定位</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">家庭组管理</div>
+      <div id="familySection"></div>
+    </div>
+    <div class="card">
+      <div class="section-title">数据管理</div>
+      <button class="btn" style="width:100%;margin-bottom:8px;" onclick="exportData()">📤 导出数据（JSON）</button>
+      <button class="btn" style="width:100%;margin-bottom:8px;" onclick="triggerImportData()">📥 导入数据</button>
+      <input type="file" id="importInput" accept=".json" style="display:none" onchange="importData(event)">
+      <button class="btn btn-danger" style="width:100%;" onclick="clearAllData()">🗑️ 清空所有数据</button>
+    </div>
+  </div>
+</div>
+
+<!-- 抽屉 - 添加/编辑物品 -->
+<div class="overlay" id="overlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-handle"></div>
+  <div class="drawer-title" id="drawerTitle">添加物品</div>
+  <div id="drawerForm"></div>
+  <div style="display:flex;gap:10px;margin-top:20px;">
+    <button class="btn" style="flex:1" onclick="closeDrawer()">取消</button>
+    <button class="btn btn-primary" style="flex:2" id="drawerSaveBtn" onclick="saveItem()">保存</button>
+  </div>
+</div>
+
+<!-- 物品详情抽屉 -->
+<div class="overlay" id="detailOverlay" onclick="closeDetail()"></div>
+<div class="drawer" id="detailDrawer">
+  <div class="drawer-handle"></div>
+  <div id="detailContent"></div>
+  <div style="display:flex;gap:10px;margin-top:20px;">
+    <button class="btn btn-danger" style="flex:1" onclick="deleteCurrentItem()">删除</button>
+    <button class="btn btn-primary" style="flex:1" onclick="editCurrentItem()">编辑</button>
+    <button class="btn" style="flex:1" onclick="closeDetail()">关闭</button>
+  </div>
+</div>
+
+<!-- 家庭组管理弹窗 -->
+<div class="overlay" id="familyOverlay" onclick="closeFamilyModal()"></div>
+<div class="drawer" id="familyDrawer">
+  <div class="drawer-handle"></div>
+  <div class="drawer-title">家庭组管理</div>
+  <div id="familyModalContent"></div>
+  <button class="btn" style="width:100%;margin-top:16px;" onclick="closeFamilyModal()">关闭</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ================================================================
+// 家居收纳管家 - 本地免登录版
+// 所有数据存储在 localStorage，无需任何后端服务
+// ================================================================
+
+// ---------- 常量 ----------
+const CATEGORIES = [
+  { key:'kitchen',icon:'🍳',label:'厨房' },
+  { key:'bedroom',icon:'🛏️',label:'卧室' },
+  { key:'living',icon:'🛋️',label:'客厅' },
+  { key:'bathroom',icon:'🚿',label:'卫浴' },
+  { key:'storage',icon:'📦',label:'储物间' },
+  { key:'study',icon:'📚',label:'书房' },
+  { key:'clothes',icon:'👕',label:'衣物' },
+  { key:'other',icon:'🏷️',label:'其他' },
+];
+const STORAGE_KEY = 'homeStorageApp';
+
+// ---------- 工具函数 ----------
+function escHtml(str) { return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function genId() { return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+function genCode() { return Math.random().toString(36).slice(2,8).toUpperCase(); }
+function catInfo(key) { return CATEGORIES.find(c=>c.key===key) || CATEGORIES[CATEGORIES.length-1]; }
+
+let toastTimer;
+function showToast(msg) {
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el.classList.remove('show'),2200);
+}
+
+// ---------- 数据管理 ----------
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch(e) { console.error('数据加载失败', e); }
+  return { families: [], items: [], currentFamilyId: null };
+}
+
+function saveData(data) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+let appData = loadData();
+
+function currentFamily() {
+  return appData.families.find(f=>f.id===appData.currentFamilyId) || null;
+}
+
+function currentItems() {
+  if (!appData.currentFamilyId) return [];
+  return appData.items.filter(i=>i.familyId===appData.currentFamilyId);
+}
+
+// ---------- 页面切换 ----------
+function switchTab(tab) {
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===tab));
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active', p.id==='page-'+tab));
+  if (tab==='items') renderItemList();
+  if (tab==='mine') renderMinePage();
+}
+
+// ---------- 家庭组 ----------
+function ensureFamily() {
+  if (appData.families.length === 0) {
+    const f = { id: genId(), name: '我的家', floorImg: '', createdAt: Date.now() };
+    appData.families.push(f);
+    appData.currentFamilyId = f.id;
+    saveData(appData);
+  }
+  if (!appData.currentFamilyId) {
+    appData.currentFamilyId = appData.families[0].id;
+    saveData(appData);
+  }
+  updateFamilyBadge();
+}
+
+function updateFamilyBadge() {
+  const f = currentFamily();
+  document.getElementById('familyNameBadge').textContent = f ? f.name : '';
+}
+
+function addFamily() {
+  const name = prompt_inline('新建家庭组名称', '新家庭');
+  if (!name) return;
+  const f = { id: genId(), name, floorImg: '', createdAt: Date.now() };
+  appData.families.push(f);
+  appData.currentFamilyId = f.id;
+  saveData(appData);
+  updateFamilyBadge();
+  renderFloorPlan();
+  renderMinePage();
+  showToast('已创建家庭组: ' + name);
+}
+
+function switchFamily(id) {
+  appData.currentFamilyId = id;
+  saveData(appData);
+  updateFamilyBadge();
+  pendingPos = null;
+  renderFloorPlan();
+  renderItemList();
+  renderMinePage();
+  closeFamilyModal();
+  showToast('已切换到: ' + currentFamily().name);
+}
+
+function renameFamily(id) {
+  const f = appData.families.find(x=>x.id===id);
+  if (!f) return;
+  const newName = prompt_inline('修改名称', f.name);
+  if (!newName || newName === f.name) return;
+  f.name = newName;
+  saveData(appData);
+  updateFamilyBadge();
+  renderMinePage();
+  showToast('已重命名');
+}
+
+function deleteFamily(id) {
+  const f = appData.families.find(x=>x.id===id);
+  if (!f) return;
+  if (appData.families.length <= 1) { showToast('至少保留一个家庭组'); return; }
+  appData.items = appData.items.filter(i=>i.familyId!==id);
+  appData.families = appData.families.filter(x=>x.id!==id);
+  if (appData.currentFamilyId === id) {
+    appData.currentFamilyId = appData.families[0].id;
+  }
+  saveData(appData);
+  updateFamilyBadge();
+  renderFloorPlan();
+  renderItemList();
+  renderMinePage();
+  closeFamilyModal();
+  showToast('已删除家庭组: ' + f.name);
+}
+
+// 简易内联输入（代替 prompt/confirm）
+function prompt_inline(title, defaultVal) {
+  const val = window.prompt(title, defaultVal);
+  return val;
+}
+
+// ---------- 户型图 ----------
+let pendingPos = null;
+
+function triggerFloorUpload() {
+  document.getElementById('floorInput').click();
+}
+
+function loadFloorPlan(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const f = currentFamily();
+    if (f) {
+      f.floorImg = e.target.result;
+      saveData(appData);
+      renderFloorPlan();
+      showToast('户型图已更新');
+    }
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+function renderFloorPlan() {
+  const wrap = document.getElementById('floorWrap');
+  const f = currentFamily();
+  const items = currentItems().filter(i=>i.xPct!=null && i.yPct!=null);
+
+  // 保存 pending marker
+  const pending = wrap.querySelector('.marker-pending');
+
+  wrap.innerHTML = '';
+
+  if (f && f.floorImg) {
+    const img = document.createElement('img');
+    img.src = f.floorImg;
+    img.alt = '户型图';
+    wrap.appendChild(img);
+    document.getElementById('floorPlaceholder')?.remove();
+  } else if (!document.getElementById('floorPlaceholder')) {
+    // wrap 里已经有 placeholder 了
+  }
+
+  // 渲染物品标记
+  items.forEach(item => {
+    const m = document.createElement('div');
+    m.className = 'marker';
+    m.style.left = item.xPct + '%';
+    m.style.top = item.yPct + '%';
+    m.innerHTML = `<div class="marker-dot"></div><div class="marker-label">${escHtml(item.name)}</div>`;
+    m.onclick = (e) => { e.stopPropagation(); showItemDetail(item.id); };
+    wrap.appendChild(m);
+  });
+
+  // 恢复 pending marker
+  if (pendingPos) {
+    const pm = document.createElement('div');
+    pm.className = 'marker marker-pending';
+    pm.style.left = pendingPos.x + '%';
+    pm.style.top = pendingPos.y + '%';
+    pm.innerHTML = '<div class="marker-dot"></div><div class="marker-label">新位置</div>';
+    wrap.appendChild(pm);
+  }
+
+  // 图例
+  const legend = document.getElementById('markerLegend');
+  const count = document.getElementById('markerCount');
+  if (items.length > 0) {
+    legend.style.display = 'flex';
+    count.textContent = items.length + ' 个标记';
+  } else {
+    legend.style.display = 'none';
+  }
+}
+
+function handleFloorClick(event) {
+  const wrap = document.getElementById('floorWrap');
+  const rect = wrap.getBoundingClientRect();
+  const xPct = ((event.clientX - rect.left) / rect.width * 100);
+  const yPct = ((event.clientY - rect.top) / rect.height * 100);
+
+  if (xPct < 0 || xPct > 100 || yPct < 0 || yPct > 100) return;
+
+  pendingPos = { x: xPct, y: yPct };
+  renderFloorPlan();
+
+  document.getElementById('addModeHint').style.display = 'block';
+  const card = document.getElementById('quickAddCard');
+  card.style.display = 'block';
+  document.getElementById('quickAddForm').innerHTML = buildItemForm();
+}
+
+function cancelAdd() {
+  pendingPos = null;
+  document.getElementById('addModeHint').style.display = 'none';
+  document.getElementById('quickAddCard').style.display = 'none';
+  renderFloorPlan();
+}
+
+function confirmAdd() {
+  const item = readItemForm('quickAddForm');
+  if (!item) return;
+  item.xPct = pendingPos.x;
+  item.yPct = pendingPos.y;
+  item.familyId = appData.currentFamilyId;
+  item.id = genId();
+  item.createdAt = Date.now();
+  appData.items.push(item);
+  saveData(appData);
+  pendingPos = null;
+  document.getElementById('addModeHint').style.display = 'none';
+  document.getElementById('quickAddCard').style.display = 'none';
+  renderFloorPlan();
+  renderItemList();
+  showToast('物品已添加');
+}
+
+// ---------- 物品表单 ----------
+function buildItemForm(item) {
+  const i = item || {};
+  const catOptions = CATEGORIES.map(c =>
+    `<div class="cat-btn ${i.cat===c.key?'selected':''}" data-cat="${c.key}" onclick="selectCat(this)">
+      <span>${c.icon}</span><span>${c.label}</span>
+    </div>`
+  ).join('');
+
+  return `
+    <label style="margin-top:0">物品名称 *</label>
+    <input type="text" id="itemName" placeholder="例如：电饭煲" value="${escHtml(i.name||'')}">
+    <label>分类</label>
+    <div class="cat-grid" id="catGrid">${catOptions}</div>
+    <input type="hidden" id="itemCat" value="${i.cat||'other'}">
+    <label>存放位置</label>
+    <input type="text" id="itemLoc" placeholder="例如：厨房橱柜第二层" value="${escHtml(i.loc||'')}">
+    <label>备注</label>
+    <textarea id="itemDesc" placeholder="补充说明…">${escHtml(i.desc||'')}</textarea>
+    <label>照片</label>
+    <div class="photo-upload" id="photoUpload" onclick="document.getElementById('itemPhotoInput').click()">
+      <div id="photoPreview" style="width:100%;height:100%;display:${i.photo?'block':'none'};">
+        ${i.photo?`<img src="${i.photo}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">`:''}
+      </div>
+      <div id="photoPlaceholder" style="display:${i.photo?'none':'flex'};flex-direction:column;align-items:center;gap:4px;">
+        <span style="font-size:20px;">📷</span>
+        <span style="font-size:11px;">拍照/选图</span>
+      </div>
+      <input type="file" id="itemPhotoInput" accept="image/*" style="display:none" onchange="handlePhotoUpload(event)">
+    </div>
+  `;
+}
+
+function selectCat(el) {
+  el.parentElement.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('itemCat').value = el.dataset.cat;
+}
+
+function handlePhotoUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    // 压缩图片
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX = 600;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = h * MAX / w; w = MAX; }
+        else { w = w * MAX / h; h = MAX; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      const preview = document.getElementById('photoPreview');
+      preview.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">`;
+      preview.style.display = 'block';
+      document.getElementById('photoPlaceholder').style.display = 'none';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+function readItemForm(formId) {
+  const name = document.getElementById('itemName')?.value?.trim();
+  if (!name) { showToast('请输入物品名称'); return null; }
+  const cat = document.getElementById('itemCat')?.value || 'other';
+  const loc = document.getElementById('itemLoc')?.value?.trim() || '';
+  const desc = document.getElementById('itemDesc')?.value?.trim() || '';
+  const photoEl = document.getElementById('photoPreview')?.querySelector('img');
+  const photo = photoEl ? photoEl.src : '';
+  return { name, cat, loc, desc, photo };
+}
+
+// ---------- 物品增删改查 ----------
+let editingId = null;
+let viewingItemId = null;
+
+function openAddDrawer() {
+  editingId = null;
+  document.getElementById('drawerTitle').textContent = '添加物品';
+  document.getElementById('drawerForm').innerHTML = buildItemForm();
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('drawer').classList.add('show');
+}
+
+function openEditDrawer(id) {
+  const item = appData.items.find(i=>i.id===id);
+  if (!item) return;
+  editingId = id;
+  document.getElementById('drawerTitle').textContent = '编辑物品';
+  document.getElementById('drawerForm').innerHTML = buildItemForm(item);
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('drawer').classList.add('show');
+}
+
+function closeDrawer() {
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('drawer').classList.remove('show');
+  editingId = null;
+}
+
+function saveItem() {
+  const formData = readItemForm('drawerForm');
+  if (!formData) return;
+
+  if (editingId) {
+    const item = appData.items.find(i=>i.id===editingId);
+    if (item) {
+      Object.assign(item, formData);
+      item.updatedAt = Date.now();
+    }
+  } else {
+    formData.id = genId();
+    formData.familyId = appData.currentFamilyId;
+    formData.createdAt = Date.now();
+    appData.items.push(formData);
+  }
+  saveData(appData);
+  closeDrawer();
+  renderItemList();
+  renderFloorPlan();
+  showToast(editingId ? '物品已更新' : '物品已添加');
+}
+
+function showItemDetail(id) {
+  const item = appData.items.find(i=>i.id===id);
+  if (!item) return;
+  viewingItemId = id;
+  const cat = catInfo(item.cat);
+  document.getElementById('detailContent').innerHTML = `
+    <div style="text-align:center;margin-bottom:16px;">
+      ${item.photo ? `<img src="${item.photo}" style="max-width:100%;max-height:200px;border-radius:12px;object-fit:cover;">` :
+      `<div style="font-size:48px;">${cat.icon}</div>`}
+    </div>
+    <div style="font-size:18px;font-weight:500;margin-bottom:8px;">${escHtml(item.name)}</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <span class="tag tag-primary">${cat.icon} ${cat.label}</span>
+      ${item.loc ? `<span class="tag tag-amber">📍 ${escHtml(item.loc)}</span>` : ''}
+    </div>
+    ${item.desc ? `<div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:12px;">${escHtml(item.desc)}</div>` : ''}
+    <div style="font-size:11px;color:var(--text2);">
+      添加时间: ${new Date(item.createdAt).toLocaleString('zh-CN')}
+      ${item.xPct!=null ? ' · 已在户型图标记位置' : ''}
+    </div>
+  `;
+  document.getElementById('detailOverlay').classList.add('show');
+  document.getElementById('detailDrawer').classList.add('show');
+}
+
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('show');
+  document.getElementById('detailDrawer').classList.remove('show');
+  viewingItemId = null;
+}
+
+function deleteCurrentItem() {
+  if (!viewingItemId) return;
+  appData.items = appData.items.filter(i=>i.id!==viewingItemId);
+  saveData(appData);
+  closeDetail();
+  renderItemList();
+  renderFloorPlan();
+  showToast('物品已删除');
+}
+
+function editCurrentItem() {
+  const id = viewingItemId;
+  closeDetail();
+  setTimeout(()=>openEditDrawer(id), 300);
+}
+
+// ---------- 物品列表渲染 ----------
+let currentCatFilter = 'all';
+
+function renderCatFilter() {
+  const el = document.getElementById('catFilter');
+  const counts = {};
+  currentItems().forEach(i => { counts[i.cat] = (counts[i.cat]||0) + 1; });
+
+  el.innerHTML = `<div class="cat-btn ${currentCatFilter==='all'?'selected':''}" onclick="filterCat('all')" style="padding:8px 12px;font-size:12px;white-space:nowrap;">
+    全部 (${currentItems().length})
+  </div>` + CATEGORIES.map(c =>
+    `<div class="cat-btn ${currentCatFilter===c.key?'selected':''}" onclick="filterCat('${c.key}')" style="padding:8px 12px;font-size:12px;white-space:nowrap;">
+      ${c.icon} ${c.label} (${counts[c.key]||0})
+    </div>`
+  ).join('');
+}
+
+function filterCat(key) {
+  currentCatFilter = key;
+  renderItemList();
+}
+
+function renderItemList() {
+  renderCatFilter();
+  const list = document.getElementById('itemList');
+  let items = currentItems();
+
+  if (currentCatFilter !== 'all') {
+    items = items.filter(i=>i.cat===currentCatFilter);
+  }
+
+  document.getElementById('itemCountText').textContent = `共 ${currentItems().length} 件`;
+
+  if (items.length === 0) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon">📦</div><div>还没有物品记录</div></div>';
+    return;
+  }
+
+  list.innerHTML = items.map(item => {
+    const cat = catInfo(item.cat);
+    return `<div class="item-card" onclick="showItemDetail('${item.id}')">
+      <div class="item-thumb">
+        ${item.photo ? `<img src="${item.photo}">` : cat.icon}
+      </div>
+      <div class="item-info">
+        <div class="item-name">${escHtml(item.name)}</div>
+        <div class="item-meta">
+          <span class="tag tag-primary" style="margin-right:4px;">${cat.icon} ${cat.label}</span>
+          ${item.loc ? escHtml(item.loc) : ''}
+        </div>
+      </div>
+      ${item.xPct!=null ? '<div style="color:var(--primary);font-size:16px;">📍</div>' : ''}
+    </div>`;
+  }).join('');
+}
+
+// ---------- 搜索 ----------
+function doSearch() {
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  const hint = document.getElementById('searchHint');
+  const list = document.getElementById('searchList');
+
+  if (!q) {
+    hint.textContent = '输入关键词查找物品';
+    list.innerHTML = '';
+    return;
+  }
+
+  const results = currentItems().filter(i =>
+    i.name.toLowerCase().includes(q) ||
+    (i.loc && i.loc.toLowerCase().includes(q)) ||
+    (i.desc && i.desc.toLowerCase().includes(q))
+  );
+
+  hint.textContent = `找到 ${results.length} 个结果`;
+  list.innerHTML = results.map(item => {
+    const cat = catInfo(item.cat);
+    return `<div class="item-card" onclick="showItemDetail('${item.id}')">
+      <div class="item-thumb">
+        ${item.photo ? `<img src="${item.photo}">` : cat.icon}
+      </div>
+      <div class="item-info">
+        <div class="item-name">${hl(item.name, q)}</div>
+        <div class="item-meta">
+          <span class="tag tag-primary" style="margin-right:4px;">${cat.icon} ${cat.label}</span>
+          ${item.loc ? hl(item.loc, q) : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function hl(rawText, q) {
+  if (!q) return escHtml(rawText);
+  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi');
+  const marked = rawText.replace(re, '\x01$1\x02');
+  return escHtml(marked)
+    .replace(/\x01/g,'<mark style="background:var(--amber-light);color:var(--amber);border-radius:2px;padding:0 2px;">')
+    .replace(/\x02/g,'</mark>');
+}
+
+// ---------- 我的页面 ----------
+function renderMinePage() {
+  const items = currentItems();
+  const located = items.filter(i=>i.xPct!=null).length;
+  const cats = new Set(items.map(i=>i.cat)).size;
+
+  document.getElementById('statTotal').textContent = items.length;
+  document.getElementById('statCats').textContent = cats;
+  document.getElementById('statLocated').textContent = located;
+
+  // 家庭组
+  const section = document.getElementById('familySection');
+  section.innerHTML = appData.families.map(f => `
+    <div class="family-card ${f.id===appData.currentFamilyId?'active':''}" onclick="switchFamily('${f.id}')">
+      <div style="font-size:24px;">🏠</div>
+      <div style="flex:1;">
+        <div style="font-weight:500;">${escHtml(f.name)}</div>
+        <div style="font-size:12px;color:var(--text2);">${appData.items.filter(i=>i.familyId===f.id).length} 件物品${f.id===appData.currentFamilyId?' · 当前':''}</div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-ghost" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();renameFamily('${f.id}')">✏️</button>
+        ${appData.families.length>1?`<button class="btn btn-ghost" style="font-size:12px;padding:4px 8px;color:var(--danger);" onclick="event.stopPropagation();deleteFamily('${f.id}')">🗑️</button>`:''}
+      </div>
+    </div>
+  `).join('') + `
+    <button class="btn" style="width:100%;margin-top:10px;" onclick="addFamily()">＋ 新建家庭组</button>
+  `;
+}
+
+// ---------- 数据导入导出 ----------
+function exportData() {
+  const json = JSON.stringify(appData, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `家居收纳管家_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('数据已导出');
+}
+
+function triggerImportData() {
+  document.getElementById('importInput').click();
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.families && data.items) {
+        appData = data;
+        saveData(appData);
+        ensureFamily();
+        renderFloorPlan();
+        renderItemList();
+        renderMinePage();
+        showToast('数据导入成功');
+      } else {
+        showToast('文件格式不正确');
+      }
+    } catch(err) {
+      showToast('导入失败：文件解析错误');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function clearAllData() {
+  if (!window.confirm('确定清空所有数据？此操作不可恢复！')) return;
+  appData = { families: [], items: [], currentFamilyId: null };
+  saveData(appData);
+  ensureFamily();
+  pendingPos = null;
+  renderFloorPlan();
+  renderItemList();
+  renderMinePage();
+  showToast('数据已清空');
+}
+
+// ---------- 家庭组弹窗（预留） ----------
+function closeFamilyModal() {
+  document.getElementById('familyOverlay').classList.remove('show');
+  document.getElementById('familyDrawer').classList.remove('show');
+}
+
+// ---------- 初始化 ----------
+function init() {
+  ensureFamily();
+  renderFloorPlan();
+  renderItemList();
+  renderMinePage();
+
+  // 如果没有户型图，显示 placeholder
+  const wrap = document.getElementById('floorWrap');
+  const f = currentFamily();
+  if (!f || !f.floorImg) {
+    if (!wrap.querySelector('.floor-placeholder')) {
+      const ph = document.createElement('div');
+      ph.className = 'floor-placeholder';
+      ph.id = 'floorPlaceholder';
+      ph.onclick = triggerFloorUpload;
+      ph.innerHTML = '<div class="floor-ph-icon">🗺️</div><div>点击上传户型图</div><div style="font-size:12px;opacity:.6;">支持拍照或相册图片</div>';
+      wrap.appendChild(ph);
+    }
+  }
+}
+
+init();
+
+// ---------- PWA：注册 Service Worker ----------
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').then(() => {
+    console.log('[SW] 注册成功');
+  }).catch(err => {
+    console.warn('[SW] 注册失败', err);
+  });
+}
+
+// ---------- PWA：安装提示 ----------
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  showInstallBanner();
+});
+
+function showInstallBanner() {
+  if (document.getElementById('installBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'installBanner';
+  banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:0.5px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;z-index:300;box-shadow:0 -2px 12px rgba(0,0,0,.08);';
+  banner.innerHTML = `
+    <span style="font-size:24px;">🏠</span>
+    <div style="flex:1;">
+      <div style="font-size:14px;font-weight:500;">安装收纳管家到桌面</div>
+      <div style="font-size:12px;color:var(--text2);">离线可用，像APP一样使用</div>
+    </div>
+    <button class="btn btn-primary" style="padding:8px 16px;font-size:13px;" onclick="doInstall()">安装</button>
+    <button class="btn btn-ghost" style="padding:8px;" onclick="this.parentElement.remove()">✕</button>
+  `;
+  document.body.appendChild(banner);
+}
+
+window.doInstall = async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const result = await deferredPrompt.userChoice;
+  if (result.outcome === 'accepted') {
+    showToast('安装成功！');
+  }
+  deferredPrompt = null;
+  document.getElementById('installBanner')?.remove();
+};
+</script>
+</body>
+</html>
