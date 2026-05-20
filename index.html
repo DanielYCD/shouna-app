@@ -10,6 +10,8 @@
 <meta name="apple-mobile-web-app-title" content="收纳管家">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
+<script src="supabase.min.js"></script>
+<script src="config.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -68,8 +70,15 @@ textarea { resize:vertical; min-height:72px; }
 /* 户型图 */
 .floor-wrap { position:relative; width:100%; overflow:hidden;
   border-radius:8px; border:0.5px solid var(--border); background:#f0ede8;
-  cursor:crosshair; touch-action:none; }
+  cursor:grab; touch-action:none; }
+.floor-wrap.dragging { cursor:grabbing; }
+.floor-wrap-inner { width:100%; transform-origin:0 0; transition:transform 0.1s ease-out; }
 .floor-wrap img { width:100%; display:block; pointer-events:none; user-select:none; }
+.floor-zoom-controls { position:absolute; bottom:10px; right:10px; display:flex; gap:6px; z-index:20; }
+.floor-zoom-btn { width:32px; height:32px; border-radius:8px; background:rgba(255,255,255,0.9);
+  border:0.5px solid var(--border); display:flex; align-items:center; justify-content:center;
+  font-size:16px; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
+.floor-zoom-btn:active { background:var(--primary-light); }
 .floor-placeholder { width:100%; height:220px; display:flex; flex-direction:column;
   align-items:center; justify-content:center; gap:10px;
   color:var(--text2); font-size:13px; cursor:pointer; }
@@ -180,12 +189,110 @@ textarea { resize:vertical; min-height:72px; }
 .stat-card { background:var(--bg); border-radius:8px; padding:12px 8px; text-align:center; }
 .stat-num { font-size:22px; font-weight:600; color:var(--primary-dark); }
 .stat-label { font-size:11px; color:var(--text2); margin-top:4px; }
+
+/* 认证页面 */
+.auth-loading { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; gap:16px; }
+.auth-loading-spinner { width:40px; height:40px; border:3px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:spin 0.8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* 深色模式 */
+[data-theme="dark"] {
+  --text: #E8E8E6;
+  --text2: #A0A09C;
+  --border: rgba(255,255,255,0.12);
+  --bg: #1A1A18;
+  --card: #242422;
+  --primary-light: #1A3D2C;
+  --success-light: #1A3D2C;
+  --danger-light: #3D1A1A;
+  --amber-light: #3D2C1A;
+}
+
+/* 开关样式 */
+.switch { position:relative; display:inline-block; width:50px; height:28px; }
+.switch input { opacity:0; width:0; height:0; }
+.slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; transition:.3s; border-radius:28px; }
+.slider:before { position:absolute; content:""; height:22px; width:22px; left:3px; bottom:3px; background-color:white; transition:.3s; border-radius:50%; }
+input:checked + .slider { background-color:var(--primary); }
+input:checked + .slider:before { transform:translateX(22px); }
+
+/* 加入家庭组弹窗 */
+.join-dialog { max-width:400px; margin:0 auto; }
+
+/* 保质期状态标签 */
+.tag-expired { background: #FCEBEB; color: #E24B4A; }
+.tag-expiring { background: #FAEEDA; color: #BA7517; }
+.tag-normal { background: #E1F5EE; color: #1D9E75; }
+
+/* 筛选按钮 */
+.filter-wrap { display:flex; gap:6px; overflow-x:auto; margin-bottom:12px; padding-bottom:4px; }
+.filter-btn { padding:8px 14px; border-radius:8px; border:0.5px solid var(--border); font-size:12px; cursor:pointer; background:var(--bg); color:var(--text2); white-space:nowrap; transition:all .15s; }
+.filter-btn.active { background:var(--primary-light); border-color:var(--primary); color:var(--primary-dark); font-weight:500; }
 </style>
 </head>
 <body>
 
+<!-- ==================== 认证页面 ==================== -->
+<div id="authPage" style="display:none;min-height:100vh;background:var(--bg);">
+  <!-- 登录页面 -->
+  <div id="loginPage" style="display:none;">
+    <div style="padding:60px 32px 32px;text-align:center;">
+      <div style="font-size:48px;margin-bottom:12px;">🏠</div>
+      <div style="font-size:22px;font-weight:600;margin-bottom:6px;">家居收纳管家</div>
+      <div style="font-size:13px;color:var(--text2);">登录后数据自动同步到云端</div>
+    </div>
+    <div class="card" style="margin:0 16px;">
+      <div style="font-size:17px;font-weight:500;margin-bottom:18px;">登录</div>
+      <div id="loginError" style="display:none;padding:10px 14px;background:var(--danger-light);color:var(--danger);border-radius:8px;font-size:13px;margin-bottom:12px;"></div>
+      <label style="margin-top:0;">邮箱</label>
+      <input type="email" id="loginEmail" placeholder="请输入邮箱" autocomplete="email">
+      <label>密码</label>
+      <input type="password" id="loginPassword" placeholder="请输入密码" autocomplete="current-password">
+      <button class="btn btn-primary" style="width:100%;margin-top:20px;" onclick="handleLogin()" id="loginBtn">登录</button>
+      <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--text2);">
+        还没有账号？<span style="color:var(--primary-dark);cursor:pointer;font-weight:500;" onclick="showRegister()">立即注册</span>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:20px;padding:0 16px;">
+      <div class="btn" style="width:100%;background:var(--bg);" onclick="skipAuth()">
+        <span style="font-size:13px;">暂不登录，先体验</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 注册页面 -->
+  <div id="registerPage" style="display:none;">
+    <div style="padding:60px 32px 32px;text-align:center;">
+      <div style="font-size:48px;margin-bottom:12px;">🏠</div>
+      <div style="font-size:22px;font-weight:600;margin-bottom:6px;">创建账号</div>
+      <div style="font-size:13px;color:var(--text2);">注册后即可跨设备同步数据</div>
+    </div>
+    <div class="card" style="margin:0 16px;">
+      <div style="font-size:17px;font-weight:500;margin-bottom:18px;">注册</div>
+      <div id="registerError" style="display:none;padding:10px 14px;background:var(--danger-light);color:var(--danger);border-radius:8px;font-size:13px;margin-bottom:12px;"></div>
+      <label style="margin-top:0;">显示名称</label>
+      <input type="text" id="regDisplayName" placeholder="你的昵称" autocomplete="name">
+      <label>邮箱</label>
+      <input type="email" id="regEmail" placeholder="请输入邮箱" autocomplete="email">
+      <label>密码</label>
+      <input type="password" id="regPassword" placeholder="至少6位密码" autocomplete="new-password">
+      <label>确认密码</label>
+      <input type="password" id="regPasswordConfirm" placeholder="再次输入密码" autocomplete="new-password">
+      <button class="btn btn-primary" style="width:100%;margin-top:20px;" onclick="handleRegister()" id="regBtn">注册</button>
+      <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--text2);">
+        已有账号？<span style="color:var(--primary-dark);cursor:pointer;font-weight:500;" onclick="showLogin()">返回登录</span>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:20px;padding:0 16px;">
+      <div class="btn" style="width:100%;background:var(--bg);" onclick="skipAuth()">
+        <span style="font-size:13px;">暂不注册，先体验</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ==================== 主界面 ==================== -->
-<div id="mainApp">
+<div id="mainApp" style="display:none;">
   <!-- 顶部导航 -->
   <div class="nav">
     <div class="nav-title">
@@ -210,6 +317,7 @@ textarea { resize:vertical; min-height:72px; }
         </div>
         <button class="btn btn-primary" onclick="triggerFloorUpload()" style="padding:8px 14px;font-size:13px;">上传图片</button>
       </div>
+      <div class="filter-wrap" id="floorTabs" style="display:none;margin-bottom:12px;"></div>
       <input type="file" id="floorInput" accept="image/*" style="display:none" onchange="loadFloorPlan(event)">
       <div class="floor-wrap" id="floorWrap" onclick="handleFloorClick(event)">
         <div class="floor-placeholder" id="floorPlaceholder" onclick="triggerFloorUpload()">
@@ -255,12 +363,30 @@ textarea { resize:vertical; min-height:72px; }
       <span class="search-icon">🔍</span>
       <input type="text" id="searchInput" placeholder="搜索物品名称、位置…" oninput="doSearch()" autocomplete="off">
     </div>
+    <div class="filter-wrap" id="expiryFilter">
+      <button class="filter-btn active" data-filter="all" onclick="setExpiryFilter('all',this)">全部</button>
+      <button class="filter-btn" data-filter="expired" onclick="setExpiryFilter('expired',this)">🔴 已过期</button>
+      <button class="filter-btn" data-filter="30days" onclick="setExpiryFilter('30days',this)">🟡 30天内过期</button>
+      <button class="filter-btn" data-filter="90days" onclick="setExpiryFilter('90days',this)">🟢 90天内过期</button>
+    </div>
     <div class="section-title" id="searchHint">输入关键词查找物品</div>
     <div class="item-list" id="searchList"></div>
   </div>
 
   <!-- 我的页面 -->
   <div class="page" id="page-mine">
+    <!-- 用户信息 -->
+    <div class="card" id="userCard" style="display:none;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:48px;height:48px;border-radius:50%;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-size:24px;">👤</div>
+        <div style="flex:1;">
+          <div style="font-size:15px;font-weight:500;" id="userDisplayName">-</div>
+          <div style="font-size:12px;color:var(--text2);" id="userEmail">-</div>
+        </div>
+        <button class="btn btn-ghost" style="font-size:12px;" onclick="handleLogout()">退出登录</button>
+      </div>
+    </div>
+
     <div class="card">
       <div style="font-size:15px;font-weight:500;margin-bottom:14px;">数据概览</div>
       <div class="stat-grid" id="statGrid">
@@ -269,10 +395,52 @@ textarea { resize:vertical; min-height:72px; }
         <div class="stat-card"><div class="stat-num" id="statLocated">0</div><div class="stat-label">已定位</div></div>
       </div>
     </div>
+
+    <!-- 家庭组管理 -->
     <div class="card">
-      <div class="section-title">家庭组管理</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="section-title" style="margin-bottom:0;">家庭组管理</div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn" style="padding:6px 10px;font-size:12px;" onclick="syncToCloud()">☁️ 同步</button>
+          <button class="btn" style="padding:6px 10px;font-size:12px;" onclick="showJoinFamilyDialog()">+ 加入家庭组</button>
+        </div>
+      </div>
       <div id="familySection"></div>
     </div>
+
+    <!-- 邀请码管理 -->
+    <div class="card" id="inviteCard" style="display:none;">
+      <div class="section-title">邀请家人</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:12px;">分享邀请码给家人，一起管理物品</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="inviteCodeDisplay" readonly style="flex:1;font-size:18px;font-weight:600;letter-spacing:2px;text-align:center;background:var(--primary-light);color:var(--primary-dark);">
+        <button class="btn btn-primary" style="padding:8px 14px;font-size:13px;" onclick="copyInviteCode()">复制</button>
+        <button class="btn" style="padding:8px 14px;font-size:13px;" onclick="refreshInviteCode()">刷新</button>
+      </div>
+    </div>
+
+    <!-- 外观设置 -->
+    <div class="card">
+      <div class="section-title">外观设置</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;">
+        <span style="font-size:14px;">深色模式</span>
+        <label class="switch">
+          <input type="checkbox" id="darkModeToggle" onchange="toggleDarkMode()">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 分类管理 -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="section-title" style="margin-bottom:0;">分类管理</div>
+        <button class="btn" style="padding:6px 10px;font-size:12px;" onclick="showCategoryManager()">管理分类</button>
+      </div>
+      <div style="font-size:12px;color:var(--text2);">当前共 <span id="catCount">0</span> 个分类</div>
+    </div>
+
+    <!-- 数据管理 -->
     <div class="card">
       <div class="section-title">数据管理</div>
       <button class="btn" style="width:100%;margin-bottom:8px;" onclick="exportData()">📤 导出数据（JSON）</button>
@@ -316,13 +484,854 @@ textarea { resize:vertical; min-height:72px; }
   <button class="btn" style="width:100%;margin-top:16px;" onclick="closeFamilyModal()">关闭</button>
 </div>
 
+<!-- 分类管理弹窗 -->
+<div class="overlay" id="categoryOverlay" onclick="closeCategoryManager()"></div>
+<div class="drawer" id="categoryDrawer">
+  <div class="drawer-handle"></div>
+  <div class="drawer-title">分类管理</div>
+  <div id="categoryList"></div>
+  <div style="margin-top:16px;">
+    <button class="btn btn-primary" style="width:100%;" onclick="showAddCategoryDialog()">+ 添加自定义分类</button>
+  </div>
+  <button class="btn" style="width:100%;margin-top:10px;" onclick="closeCategoryManager()">关闭</button>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 // ================================================================
-// 家居收纳管家 - 本地免登录版
-// 所有数据存储在 localStorage，无需任何后端服务
+// 家居收纳管家 - 云同步版
+// 支持 Supabase 用户认证和数据同步
 // ================================================================
+
+// ---------- Supabase 初始化 ----------
+let supabaseClient = null;
+let currentUser = null;
+let currentSession = null;
+
+function initSupabase() {
+  try {
+    if (typeof SUPABASE_CONFIG !== 'undefined' && SUPABASE_CONFIG.anonKey !== 'your-anon-key-here') {
+      supabaseClient = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
+        auth: SUPABASE_CONFIG.auth,
+        realtime: SUPABASE_CONFIG.realtime,
+        // 添加自定义fetch选项
+        fetch: (...args) => fetch(...args)
+      });
+      console.log('[Supabase] 初始化成功');
+      return true;
+    } else {
+      console.warn('[Supabase] 未配置或配置无效，使用本地模式');
+      return false;
+    }
+  } catch (e) {
+    console.error('[Supabase] 初始化失败:', e);
+    return false;
+  }
+}
+
+// 网络连接测试
+async function testNetworkConnection() {
+  try {
+    const response = await fetch(SUPABASE_CONFIG.url + '/rest/v1/', {
+      method: 'HEAD',
+      mode: 'no-cors'
+    });
+    return true;
+  } catch (e) {
+    console.error('[Network] 连接测试失败:', e);
+    return false;
+  }
+}
+
+// ---------- 认证状态管理 ----------
+async function checkAuthState() {
+  if (!supabaseClient) return false;
+
+  try {
+    const { data: { session }, error } = await supabaseClient.auth.getSession();
+    if (error) throw error;
+
+    if (session) {
+      currentSession = session;
+      currentUser = session.user;
+      console.log('[Auth] 已登录:', currentUser.email);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error('[Auth] 检查登录状态失败:', e);
+    return false;
+  }
+}
+
+// ---------- 登录 ----------
+async function handleLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errorEl = document.getElementById('loginError');
+  const btn = document.getElementById('loginBtn');
+
+  // 验证
+  if (!email) { showAuthError(errorEl, '请输入邮箱'); return; }
+  if (!password) { showAuthError(errorEl, '请输入密码'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '登录中...';
+  errorEl.style.display = 'none';
+
+  try {
+    if (!supabaseClient) throw new Error('Supabase未初始化，请刷新页面重试');
+
+    // 网络连接测试
+    const networkOk = await testNetworkConnection();
+    if (!networkOk) {
+      throw new Error('无法连接到服务器，请检查网络连接后重试');
+    }
+
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) {
+      // 提供更友好的错误信息
+      let errorMsg = error.message || '登录失败';
+      if (errorMsg.includes('fetch')) {
+        errorMsg = '网络连接失败，请检查网络后重试';
+      } else if (errorMsg.includes('Invalid login credentials')) {
+        errorMsg = '邮箱或密码错误';
+      }
+      throw new Error(errorMsg);
+    }
+
+    currentSession = data.session;
+    currentUser = data.user;
+
+    // 从云端加载数据
+    btn.textContent = '加载数据...';
+    const loadSuccess = await loadAllDataFromCloud();
+    if (!loadSuccess) {
+      throw new Error('加载云端数据失败');
+    }
+
+    showToast('登录成功');
+    enterMainApp();
+  } catch (e) {
+    showAuthError(errorEl, e.message || '登录失败，请检查邮箱和密码');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '登录';
+  }
+}
+
+// ---------- 注册 ----------
+async function handleRegister() {
+  const displayName = document.getElementById('regDisplayName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const passwordConfirm = document.getElementById('regPasswordConfirm').value;
+  const errorEl = document.getElementById('registerError');
+  const btn = document.getElementById('regBtn');
+
+  // 验证
+  if (!displayName) { showAuthError(errorEl, '请输入显示名称'); return; }
+  if (!email) { showAuthError(errorEl, '请输入邮箱'); return; }
+  if (!password || password.length < 6) { showAuthError(errorEl, '密码至少需要6位'); return; }
+  if (password !== passwordConfirm) { showAuthError(errorEl, '两次输入的密码不一致'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '注册中...';
+  errorEl.style.display = 'none';
+
+  try {
+    if (!supabaseClient) throw new Error('Supabase未初始化，请刷新页面重试');
+
+    // 网络连接测试
+    const networkOk = await testNetworkConnection();
+    if (!networkOk) {
+      throw new Error('无法连接到服务器，请检查网络连接后重试');
+    }
+
+    // 注册用户
+    const { data, error } = await supabaseClient.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { display_name: displayName }
+      }
+    });
+    if (error) {
+      // 提供更友好的错误信息
+      let errorMsg = error.message || '注册失败';
+      if (errorMsg.includes('fetch')) {
+        errorMsg = '网络连接失败，请检查网络后重试';
+      } else if (errorMsg.includes('already registered')) {
+        errorMsg = '该邮箱已注册，请直接登录';
+      }
+      throw new Error(errorMsg);
+    }
+
+    // 创建用户资料
+    if (data.user) {
+      const { error: profileError } = await supabaseClient
+        .from(SUPABASE_CONFIG.tables.profiles)
+        .insert({
+          id: data.user.id,
+          display_name: displayName,
+          created_at: new Date().toISOString()
+        });
+      if (profileError) console.warn('[Profile] 创建资料失败:', profileError);
+
+      // 创建默认家庭组
+      const { error: familyError } = await supabaseClient
+        .from(SUPABASE_CONFIG.tables.families)
+        .insert({
+          name: '我的家',
+          owner_id: data.user.id,
+          invite_code: genCode(),
+          created_at: new Date().toISOString()
+        });
+      if (familyError) console.warn('[Family] 创建家庭组失败:', familyError);
+    }
+
+    currentSession = data.session;
+    currentUser = data.user;
+
+    // 从云端加载数据
+    btn.textContent = '加载数据...';
+    const loadSuccess = await loadAllDataFromCloud();
+    if (!loadSuccess) {
+      throw new Error('加载云端数据失败');
+    }
+
+    showToast('注册成功');
+    enterMainApp();
+  } catch (e) {
+    showAuthError(errorEl, e.message || '注册失败，请稍后重试');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '注册';
+  }
+}
+
+// ---------- 退出登录 ----------
+async function handleLogout() {
+  try {
+    if (supabaseClient) {
+      await supabaseClient.auth.signOut();
+    }
+    currentUser = null;
+    currentSession = null;
+    showToast('已退出登录');
+    showAuthPage();
+  } catch (e) {
+    console.error('[Auth] 退出失败:', e);
+  }
+}
+
+// ---------- UI 辅助函数 ----------
+function showAuthError(el, msg) {
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function showLogin() {
+  document.getElementById('loginPage').style.display = 'block';
+  document.getElementById('registerPage').style.display = 'none';
+}
+
+function showRegister() {
+  document.getElementById('loginPage').style.display = 'none';
+  document.getElementById('registerPage').style.display = 'block';
+}
+
+function showAuthPage() {
+  document.getElementById('authPage').style.display = 'block';
+  document.getElementById('mainApp').style.display = 'none';
+  showLogin();
+}
+
+function skipAuth() {
+  enterMainApp();
+}
+
+function enterMainApp() {
+  document.getElementById('authPage').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'block';
+  init();
+}
+
+// ---------- 页面加载时检查登录状态 ----------
+window.addEventListener('DOMContentLoaded', async () => {
+  const supabaseReady = initSupabase();
+
+  if (supabaseReady) {
+    const isLoggedIn = await checkAuthState();
+    if (isLoggedIn) {
+      // 从云端加载数据
+      await loadAllDataFromCloud();
+      enterMainApp();
+    } else {
+      showAuthPage();
+      checkLegacyData();
+    }
+  } else {
+    // 无Supabase，直接进入主界面
+    enterMainApp();
+  }
+});
+
+// ---------- 旧版数据迁移 ----------
+function checkLegacyData() {
+  try {
+    const legacyKey = 'homeStorageApp';
+    const legacyData = localStorage.getItem(legacyKey);
+    if (legacyData) {
+      const parsed = JSON.parse(legacyData);
+      if (parsed.families && parsed.families.length > 0) {
+        showMigrationDialog(parsed);
+      }
+    }
+  } catch (e) {
+    console.warn('[Migration] 检查旧版数据失败:', e);
+  }
+}
+
+function showMigrationDialog(data) {
+  const itemCount = data.items ? data.items.length : 0;
+  const familyCount = data.families ? data.families.length : 0;
+
+  const dialog = document.createElement('div');
+  dialog.className = 'overlay show';
+  dialog.style.zIndex = '500';
+  dialog.innerHTML = `
+    <div class="drawer show" style="max-height:80vh;">
+      <div class="drawer-handle"></div>
+      <div class="drawer-title">检测到本地数据</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:16px;">
+        发现 <strong>${familyCount}</strong> 个家庭组，<strong>${itemCount}</strong> 件物品。<br>
+        是否导入到云端？导入后可在多设备同步。
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn" style="flex:1" onclick="dismissMigration(this)">稍后再说</button>
+        <button class="btn btn-primary" style="flex:2" onclick="importLegacyData(this)">导入数据</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  dialog._legacyData = data;
+}
+
+async function importLegacyData(btn) {
+  const overlay = btn.closest('.overlay');
+  const data = overlay._legacyData;
+
+  if (!currentUser || !supabaseClient) {
+    showToast('请先登录后再导入数据');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '导入中...';
+
+  try {
+    // 导入家庭组
+    for (const family of data.families) {
+      const { data: newFamily, error: familyErr } = await supabaseClient
+        .from(SUPABASE_CONFIG.tables.families)
+        .insert({
+          name: family.name,
+          owner_id: currentUser.id,
+          floor_img: family.floorImg || null,
+          invite_code: genCode(),
+          created_at: new Date(family.createdAt).toISOString()
+        })
+        .select()
+        .single();
+
+      if (familyErr) throw familyErr;
+
+      // 导入该家庭组下的物品
+      const familyItems = data.items.filter(i => i.familyId === family.id);
+      if (familyItems.length > 0 && newFamily) {
+        const itemsToInsert = familyItems.map(item => ({
+          family_id: newFamily.id,
+          name: item.name,
+          cat: item.cat || 'other',
+          loc: item.loc || '',
+          desc: item.desc || '',
+          photo: item.photo || null,
+          x_pct: item.xPct || null,
+          y_pct: item.yPct || null,
+          expiry_date: item.expiryDate || null,
+          floor_img_id: item.floorImgId || '',
+          created_by: currentUser.id,
+          created_at: new Date(item.createdAt).toISOString()
+        }));
+
+        const { error: itemsErr } = await supabaseClient
+          .from(SUPABASE_CONFIG.tables.items)
+          .insert(itemsToInsert);
+
+        if (itemsErr) throw itemsErr;
+      }
+    }
+
+    showToast('数据导入成功');
+    overlay.remove();
+    enterMainApp();
+  } catch (e) {
+    console.error('[Migration] 导入失败:', e);
+    showToast('导入失败: ' + (e.message || '未知错误'));
+    btn.disabled = false;
+    btn.textContent = '导入数据';
+  }
+}
+
+function dismissMigration(btn) {
+  const overlay = btn.closest('.overlay');
+  overlay.remove();
+}
+
+// ---------- 家庭组功能（云同步版） ----------
+async function loadCloudFamilies() {
+  if (!supabaseClient || !currentUser) return;
+
+  try {
+    // 获取用户所属的家庭组
+    const { data: memberships, error: memberErr } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.familyMembers)
+      .select('family_id, role')
+      .eq('user_id', currentUser.id);
+
+    if (memberErr) throw memberErr;
+
+    if (memberships && memberships.length > 0) {
+      const familyIds = memberships.map(m => m.family_id);
+      const { data: families, error: familyErr } = await supabaseClient
+        .from(SUPABASE_CONFIG.tables.families)
+        .select('*')
+        .in('id', familyIds);
+
+      if (familyErr) throw familyErr;
+      return families || [];
+    }
+
+    return [];
+  } catch (e) {
+    console.error('[Family] 加载家庭组失败:', e);
+    return [];
+  }
+}
+
+async function loadCloudItems(familyId) {
+  if (!supabaseClient || !familyId) return [];
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.items)
+      .select('*')
+      .eq('family_id', familyId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  } catch (e) {
+    console.error('[Items] 加载物品失败:', e);
+    return [];
+  }
+}
+
+async function loadCloudCustomCategories(familyId) {
+  if (!supabaseClient || !familyId) return [];
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.customCategories)
+      .select('*')
+      .eq('family_id', familyId)
+      .eq('user_id', currentUser.id);
+
+    if (error) throw error;
+    return (data || []).map(c => ({ key: c.key, icon: c.icon, label: c.label }));
+  } catch (e) {
+    console.error('[Categories] 加载自定义分类失败:', e);
+    return [];
+  }
+}
+
+async function createCloudFamily(name) {
+  if (!supabaseClient || !currentUser) return null;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.families)
+      .insert({
+        name,
+        owner_id: currentUser.id,
+        invite_code: genCode(),
+        floor_imgs: [],
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error('[Family] 创建家庭组失败:', e);
+    return null;
+  }
+}
+
+async function joinFamilyByInviteCode(inviteCode) {
+  if (!supabaseClient || !currentUser) return { success: false, error: '未登录' };
+
+  try {
+    const normalizedCode = inviteCode.toUpperCase().trim();
+    console.log('[Family] 尝试使用邀请码加入:', normalizedCode);
+
+    // 直接查询邀请码对应的家庭组
+    const { data: families, error: findErr } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.families)
+      .select('id, name, invite_code')
+      .eq('invite_code', normalizedCode)
+      .maybeSingle();
+
+    console.log('[Family] 查询结果:', { families, findErr, code: normalizedCode });
+
+    if (findErr) {
+      console.error('[Family] 查询失败:', findErr);
+      return { success: false, error: '查询失败：' + (findErr.message || '未知错误') };
+    }
+
+    if (!families) {
+      console.log('[Family] 未找到邀请码对应的家庭组');
+      return { success: false, error: '邀请码无效或已过期' };
+    }
+
+    console.log('[Family] 找到家庭组:', families);
+    return await joinFamilyDirect(families);
+  } catch (e) {
+    console.error('[Family] 加入家庭组失败:', e);
+    return { success: false, error: e.message || '加入失败' };
+  }
+}
+
+async function joinFamilyDirect(family) {
+  try {
+    // 检查是否已经是成员
+    const { data: existing } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.familyMembers)
+      .select('id')
+      .eq('family_id', family.id)
+      .eq('user_id', currentUser.id)
+      .maybeSingle();
+
+    if (existing) {
+      return { success: false, error: '你已经是该家庭组的成员' };
+    }
+
+    // 加入家庭组
+    const { error: joinErr } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.familyMembers)
+      .insert({
+        family_id: family.id,
+        user_id: currentUser.id,
+        role: 'member',
+        joined_at: new Date().toISOString()
+      });
+
+    if (joinErr) throw joinErr;
+
+    return { success: true, family: family };
+  } catch (e) {
+    console.error('[Family] 加入家庭组失败:', e);
+    return { success: false, error: e.message || '加入失败' };
+  }
+}
+
+async function getFamilyMembers(familyId) {
+  if (!supabaseClient || !familyId) return [];
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.familyMembers)
+      .select('*, profiles(display_name)')
+      .eq('family_id', familyId);
+
+    if (error) throw error;
+    return data || [];
+  } catch (e) {
+    console.error('[Family] 获取成员列表失败:', e);
+    return [];
+  }
+}
+
+async function inviteFamilyMember(familyId) {
+  if (!supabaseClient) return null;
+
+  try {
+    // 获取邀请码
+    const { data, error } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.families)
+      .select('invite_code')
+      .eq('id', familyId)
+      .single();
+
+    if (error) throw error;
+    return data?.invite_code;
+  } catch (e) {
+    console.error('[Family] 获取邀请码失败:', e);
+    return null;
+  }
+}
+
+// ---------- 从云端加载所有数据 ----------
+async function loadAllDataFromCloud() {
+  if (!supabaseClient || !currentUser) return false;
+
+  try {
+    console.log('[Cloud] 开始从云端加载数据...');
+
+    // 1. 获取用户作为owner的家庭组
+    const { data: ownedFamilies, error: ownedErr } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.families)
+      .select('*')
+      .eq('owner_id', currentUser.id);
+
+    if (ownedErr) throw ownedErr;
+
+    // 2. 获取用户作为member的家庭组
+    const { data: memberRecords, error: memberErr } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.familyMembers)
+      .select('family_id')
+      .eq('user_id', currentUser.id);
+
+    if (memberErr) throw memberErr;
+
+    // 3. 获取成员家庭组的详细信息
+    let memberFamilies = [];
+    if (memberRecords && memberRecords.length > 0) {
+      const familyIds = memberRecords.map(r => r.family_id);
+      const { data: families, error: familiesErr } = await supabaseClient
+        .from(SUPABASE_CONFIG.tables.families)
+        .select('*')
+        .in('id', familyIds);
+
+      if (familiesErr) throw familiesErr;
+      memberFamilies = families || [];
+    }
+
+    // 4. 合并所有家庭组（去重）
+    const allFamilies = [...(ownedFamilies || [])];
+    memberFamilies.forEach(f => {
+      if (!allFamilies.find(af => af.id === f.id)) {
+        allFamilies.push(f);
+      }
+    });
+
+    // 5. 转换为本地格式
+    appData.families = allFamilies.map(f => ({
+      id: f.id,
+      name: f.name,
+      inviteCode: f.invite_code,
+      floorImgs: f.floor_imgs || [],
+      currentFloorImgId: f.current_floor_img_id || '',
+      createdAt: new Date(f.created_at).getTime()
+    }));
+
+    // 6. 设置当前家庭组
+    if (appData.families.length > 0) {
+      if (!appData.currentFamilyId || !appData.families.find(f => f.id === appData.currentFamilyId)) {
+        appData.currentFamilyId = appData.families[0].id;
+      }
+    }
+
+    // 7. 获取所有家庭组的物品
+    const familyIds = appData.families.map(f => f.id);
+    if (familyIds.length > 0) {
+      const { data: items, error: itemsErr } = await supabaseClient
+        .from(SUPABASE_CONFIG.tables.items)
+        .select('*')
+        .in('family_id', familyIds);
+
+      if (itemsErr) throw itemsErr;
+
+      // 转换为本地格式
+      appData.items = (items || []).map(i => ({
+        id: i.id,
+        familyId: i.family_id,
+        name: i.name,
+        cat: i.cat,
+        loc: i.loc,
+        desc: i.desc,
+        photo: i.photo,
+        xPct: i.x_pct,
+        yPct: i.y_pct,
+        expiryDate: i.expiry_date,
+        floorImgId: i.floor_img_id,
+        createdAt: new Date(i.created_at).getTime()
+      }));
+    } else {
+      appData.items = [];
+    }
+
+    // 8. 获取自定义分类
+    if (familyIds.length > 0) {
+      const { data: categories, error: catErr } = await supabaseClient
+        .from(SUPABASE_CONFIG.tables.customCategories)
+        .select('*')
+        .in('family_id', familyIds);
+
+      if (catErr) throw catErr;
+
+      appData.customCategories = (categories || []).map(c => ({
+        key: c.key,
+        icon: c.icon,
+        label: c.label,
+        familyId: c.family_id
+      }));
+    } else {
+      appData.customCategories = [];
+    }
+
+    console.log('[Cloud] 数据加载完成:', {
+      families: appData.families.length,
+      items: appData.items.length,
+      categories: appData.customCategories.length
+    });
+
+    return true;
+  } catch (e) {
+    console.error('[Cloud] 加载数据失败:', e);
+    showToast('加载云端数据失败：' + (e.message || '网络错误'));
+    return false;
+  }
+}
+
+// ---------- 深色模式 ----------
+function initDarkMode() {
+  const savedTheme = localStorage.getItem('theme') || 'light';
+  document.documentElement.setAttribute('data-theme', savedTheme);
+  const toggle = document.getElementById('darkModeToggle');
+  if (toggle) toggle.checked = savedTheme === 'dark';
+}
+
+function toggleDarkMode() {
+  const toggle = document.getElementById('darkModeToggle');
+  const theme = toggle.checked ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('theme', theme);
+}
+
+// ---------- 加入家庭组弹窗 ----------
+function showJoinFamilyDialog() {
+  const dialog = document.createElement('div');
+  dialog.className = 'overlay show';
+  dialog.style.zIndex = '500';
+  dialog.innerHTML = `
+    <div class="drawer show join-dialog">
+      <div class="drawer-handle"></div>
+      <div class="drawer-title">加入家庭组</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:16px;">
+        输入家人分享的6位邀请码即可加入
+      </div>
+      <label style="margin-top:0;">邀请码</label>
+      <input type="text" id="joinInviteCode" placeholder="请输入6位邀请码" maxlength="6" style="text-align:center;font-size:18px;font-weight:600;letter-spacing:2px;text-transform:uppercase;">
+      <div id="joinError" style="display:none;padding:10px 14px;background:var(--danger-light);color:var(--danger);border-radius:8px;font-size:13px;margin-top:12px;"></div>
+      <div style="display:flex;gap:10px;margin-top:20px;">
+        <button class="btn" style="flex:1" onclick="closeJoinDialog(this.closest('.overlay'))">取消</button>
+        <button class="btn btn-primary" style="flex:2" onclick="handleJoinFamily(this)">加入</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+}
+
+async function handleJoinFamily(btn) {
+  const code = document.getElementById('joinInviteCode').value.trim();
+  const errorEl = document.getElementById('joinError');
+
+  if (!code || code.length !== 6) {
+    errorEl.textContent = '请输入6位邀请码';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '加入中...';
+  errorEl.style.display = 'none';
+
+  const result = await joinFamilyByInviteCode(code);
+
+  if (result.success) {
+    showToast('已加入家庭组: ' + result.family.name);
+    closeJoinDialog(btn.closest('.overlay'));
+    renderMinePage();
+    renderFloorPlan();
+    renderItemList();
+  } else {
+    errorEl.textContent = result.error;
+    errorEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = '加入';
+  }
+}
+
+function closeJoinDialog(el) {
+  if (el) el.remove();
+}
+
+// ---------- 邀请码管理 ----------
+async function refreshInviteCode() {
+  if (!supabaseClient || !currentFamily()) {
+    showToast('请先选择家庭组');
+    return;
+  }
+
+  const family = currentFamily();
+  const newCode = genCode(); // 生成新的6位邀请码
+
+  // 检查家庭ID是否为UUID格式（云同步的家庭）
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!family.id || !uuidRegex.test(family.id)) {
+    showToast('本地家庭组请先同步到云端');
+    return;
+  }
+
+  try {
+    // 更新数据库中的邀请码
+    const { error } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.families)
+      .update({ invite_code: newCode })
+      .eq('id', family.id);
+
+    if (error) throw error;
+
+    // 更新本地数据
+    family.inviteCode = newCode;
+    saveData(appData);
+
+    document.getElementById('inviteCodeDisplay').value = newCode;
+    showToast('邀请码已刷新');
+  } catch (e) {
+    console.error('[Family] 刷新邀请码失败:', e);
+    showToast('刷新失败：' + (e.message || '未知错误'));
+  }
+}
+
+function copyInviteCode() {
+  const code = document.getElementById('inviteCodeDisplay').value;
+  if (code) {
+    navigator.clipboard.writeText(code).then(() => {
+      showToast('邀请码已复制');
+    }).catch(() => {
+      // fallback
+      const input = document.getElementById('inviteCodeDisplay');
+      input.select();
+      document.execCommand('copy');
+      showToast('邀请码已复制');
+    });
+  }
+}
 
 // ---------- 常量 ----------
 const CATEGORIES = [
@@ -343,6 +1352,88 @@ function genId() { return Date.now().toString(36)+Math.random().toString(36).sli
 function genCode() { return Math.random().toString(36).slice(2,8).toUpperCase(); }
 function catInfo(key) { return CATEGORIES.find(c=>c.key===key) || CATEGORIES[CATEGORIES.length-1]; }
 
+// ---------- 保质期工具函数 ----------
+function getDaysUntilExpiry(dateStr) {
+  if (!dateStr) return Infinity;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const expiry = new Date(dateStr);
+  expiry.setHours(0, 0, 0, 0);
+  return Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+}
+
+function getExpiryStatus(dateStr) {
+  if (!dateStr) return 'none';
+  const days = getDaysUntilExpiry(dateStr);
+  if (days < 0) return 'expired';
+  if (days <= 30) return 'expiring';
+  return 'normal';
+}
+
+function getExpiryStatusLabel(dateStr) {
+  const status = getExpiryStatus(dateStr);
+  if (status === 'expired') return '已过期';
+  if (status === 'expiring') {
+    const days = getDaysUntilExpiry(dateStr);
+    return days === 0 ? '今天过期' : `${days}天后过期`;
+  }
+  if (status === 'normal') {
+    const days = getDaysUntilExpiry(dateStr);
+    return `${days}天后过期`;
+  }
+  return '';
+}
+
+function getExpiryTagClass(dateStr) {
+  const status = getExpiryStatus(dateStr);
+  if (status === 'expired') return 'tag-expired';
+  if (status === 'expiring') return 'tag-expiring';
+  return 'tag-normal';
+}
+
+function getMarkerColor(expiryDate) {
+  const status = getExpiryStatus(expiryDate);
+  if (status === 'expired') return '#E24B4A';
+  if (status === 'expiring') return '#BA7517';
+  return '#2BA876';
+}
+
+// ---------- 自定义分类 ----------
+function getAllCategories() {
+  const custom = (appData.customCategories || []).map(c => ({
+    key: c.key,
+    icon: c.icon,
+    label: c.label
+  }));
+  return [...CATEGORIES, ...custom];
+}
+
+function catInfo(key) {
+  return getAllCategories().find(c => c.key === key) || { key: 'other', icon: '🏷️', label: '其他' };
+}
+
+function addCustomCategory(icon, label) {
+  if (!appData.customCategories) appData.customCategories = [];
+  const key = 'custom_' + genId();
+  appData.customCategories.push({ key, icon, label });
+  saveData(appData);
+  return key;
+}
+
+function editCustomCategory(key, icon, label) {
+  const cat = appData.customCategories.find(c => c.key === key);
+  if (cat) {
+    cat.icon = icon;
+    cat.label = label;
+    saveData(appData);
+  }
+}
+
+function deleteCustomCategory(key) {
+  appData.customCategories = appData.customCategories.filter(c => c.key !== key);
+  saveData(appData);
+}
+
 let toastTimer;
 function showToast(msg) {
   const el=document.getElementById('toast');
@@ -357,11 +1448,13 @@ function loadData() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch(e) { console.error('数据加载失败', e); }
-  return { families: [], items: [], currentFamilyId: null };
+  return { families: [], items: [], currentFamilyId: null, customCategories: [] };
 }
 
 function saveData(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  // 纯在线模式：不再保存到localStorage
+  // 数据已通过Supabase API保存到云端
+  console.log('[Storage] 数据已通过Supabase保存到云端');
 }
 
 let appData = loadData();
@@ -385,15 +1478,28 @@ function switchTab(tab) {
 
 // ---------- 家庭组 ----------
 function ensureFamily() {
+  // 纯在线模式：不再创建本地家庭组，所有数据从云端加载
+  // 如果没有家庭组，提示用户创建或加入
   if (appData.families.length === 0) {
-    const f = { id: genId(), name: '我的家', floorImg: '', createdAt: Date.now() };
-    appData.families.push(f);
-    appData.currentFamilyId = f.id;
-    saveData(appData);
+    console.log('[Family] 没有家庭组，请创建或加入');
   }
-  if (!appData.currentFamilyId) {
+
+  // 数据迁移：将旧版floorImg迁移到floorImgs数组（兼容旧数据）
+  appData.families.forEach(f => {
+    if (f.floorImg && (!f.floorImgs || f.floorImgs.length === 0)) {
+      const floorImg = { id: genId(), name: '默认楼层', img: f.floorImg };
+      f.floorImgs = [floorImg];
+      f.currentFloorImgId = floorImg.id;
+      delete f.floorImg;
+    }
+    if (!f.floorImgs) f.floorImgs = [];
+    if (!f.currentFloorImgId && f.floorImgs.length > 0) {
+      f.currentFloorImgId = f.floorImgs[0].id;
+    }
+  });
+
+  if (!appData.currentFamilyId && appData.families.length > 0) {
     appData.currentFamilyId = appData.families[0].id;
-    saveData(appData);
   }
   updateFamilyBadge();
 }
@@ -403,15 +1509,126 @@ function updateFamilyBadge() {
   document.getElementById('familyNameBadge').textContent = f ? f.name : '';
 }
 
-function addFamily() {
+// ---------- 户型图管理 ----------
+function currentFloorImg() {
+  const f = currentFamily();
+  if (!f || !f.floorImgs || f.floorImgs.length === 0) return null;
+  return f.floorImgs.find(img => img.id === f.currentFloorImgId) || f.floorImgs[0];
+}
+
+function switchFloorImg(floorId) {
+  const f = currentFamily();
+  if (!f) return;
+  f.currentFloorImgId = floorId;
+  saveData(appData);
+  renderFloorPlan();
+  renderFloorTabs();
+}
+
+function addFloorImg(name, imgData) {
+  const f = currentFamily();
+  if (!f) return;
+  if (!f.floorImgs) f.floorImgs = [];
+  const newFloor = { id: genId(), name, img: imgData };
+  f.floorImgs.push(newFloor);
+  f.currentFloorImgId = newFloor.id;
+  saveData(appData);
+  renderFloorPlan();
+  renderFloorTabs();
+}
+
+function renameFloorImg(floorId) {
+  const f = currentFamily();
+  if (!f) return;
+  const floor = f.floorImgs.find(img => img.id === floorId);
+  if (!floor) return;
+  const newName = prompt('重命名楼层', floor.name);
+  if (newName && newName !== floor.name) {
+    floor.name = newName;
+    saveData(appData);
+    renderFloorTabs();
+  }
+}
+
+function deleteFloorImg(floorId) {
+  const f = currentFamily();
+  if (!f || f.floorImgs.length <= 1) {
+    showToast('至少保留一张户型图');
+    return;
+  }
+  if (!confirm('确定删除该户型图吗？')) return;
+
+  // 删除关联的物品标记
+  appData.items.forEach(item => {
+    if (item.floorImgId === floorId) {
+      item.floorImgId = '';
+      item.xPct = null;
+      item.yPct = null;
+    }
+  });
+
+  f.floorImgs = f.floorImgs.filter(img => img.id !== floorId);
+  if (f.currentFloorImgId === floorId) {
+    f.currentFloorImgId = f.floorImgs[0]?.id || '';
+  }
+  saveData(appData);
+  renderFloorPlan();
+  renderFloorTabs();
+  renderItemList();
+}
+
+function renderFloorTabs() {
+  const f = currentFamily();
+  const tabsContainer = document.getElementById('floorTabs');
+  if (!f || !f.floorImgs || f.floorImgs.length === 0) {
+    tabsContainer.style.display = 'none';
+    return;
+  }
+  tabsContainer.style.display = 'flex';
+  tabsContainer.innerHTML = f.floorImgs.map(floor => `
+    <div class="cat-btn ${floor.id === f.currentFloorImgId ? 'selected' : ''}"
+         onclick="switchFloorImg('${floor.id}')"
+         style="padding:8px 14px;font-size:12px;white-space:nowrap;cursor:pointer;">
+      ${escHtml(floor.name)}
+    </div>
+  `).join('') + `
+    <div class="cat-btn" onclick="showAddFloorDialog()" style="padding:8px 14px;font-size:12px;white-space:nowrap;cursor:pointer;color:var(--primary-dark);">
+      + 添加
+    </div>
+  `;
+}
+
+async function addFamily() {
   const name = prompt_inline('新建家庭组名称', '新家庭');
   if (!name) return;
-  const f = { id: genId(), name, floorImg: '', createdAt: Date.now() };
-  appData.families.push(f);
-  appData.currentFamilyId = f.id;
-  saveData(appData);
+
+  if (supabaseClient && currentUser) {
+    // 云端模式：创建到Supabase
+    const result = await createCloudFamily(name);
+    if (result) {
+      appData.families.push({
+        id: result.id,
+        name: result.name,
+        inviteCode: result.invite_code,
+        floorImgs: result.floor_imgs || [],
+        currentFloorImgId: result.current_floor_img_id || '',
+        createdAt: new Date(result.created_at).getTime()
+      });
+      appData.currentFamilyId = result.id;
+    } else {
+      showToast('创建失败');
+      return;
+    }
+  } else {
+    // 本地模式
+    const f = { id: genId(), name, floorImgs: [], currentFloorImgId: '', createdAt: Date.now() };
+    appData.families.push(f);
+    appData.currentFamilyId = f.id;
+  }
+
   updateFamilyBadge();
   renderFloorPlan();
+  renderItemList();
   renderMinePage();
   showToast('已创建家庭组: ' + name);
 }
@@ -476,33 +1693,104 @@ function loadFloorPlan(event) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (e) => {
+    const floorImg = currentFloorImg();
     const f = currentFamily();
-    if (f) {
-      f.floorImg = e.target.result;
+    if (floorImg) {
+      // 更新当前户型图
+      floorImg.img = e.target.result;
       saveData(appData);
       renderFloorPlan();
       showToast('户型图已更新');
+    } else if (f) {
+      // 第一次上传，创建默认楼层
+      addFloorImg('默认楼层', e.target.result);
+      showToast('户型图已添加');
     }
   };
   reader.readAsDataURL(file);
   event.target.value = '';
 }
 
+function showAddFloorDialog() {
+  const dialog = document.createElement('div');
+  dialog.className = 'overlay show';
+  dialog.style.zIndex = '500';
+  dialog.id = 'addFloorDialog';
+  dialog.innerHTML = `
+    <div class="drawer show" style="max-height:80vh;">
+      <div class="drawer-handle"></div>
+      <div class="drawer-title">添加户型图</div>
+      <label style="margin-top:0;">楼层名称</label>
+      <input type="text" id="newFloorName" placeholder="例如：二楼" maxlength="20">
+      <label>选择图片</label>
+      <div style="margin-top:12px;">
+        <button class="btn" style="width:100%;" onclick="document.getElementById('newFloorInput').click()">📷 选择图片</button>
+        <input type="file" id="newFloorInput" accept="image/*" style="display:none" onchange="handleNewFloorUpload(event)">
+      </div>
+      <div id="newFloorPreview" style="margin-top:12px;display:none;">
+        <img id="newFloorPreviewImg" style="width:100%;border-radius:8px;">
+      </div>
+      <div style="display:flex;gap:10px;margin-top:20px;">
+        <button class="btn" style="flex:1" onclick="closeAddFloorDialog()">取消</button>
+        <button class="btn btn-primary" style="flex:2" onclick="handleAddFloor()">添加</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+}
+
+let newFloorImageData = null;
+
+function handleNewFloorUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    newFloorImageData = e.target.result;
+    document.getElementById('newFloorPreviewImg').src = newFloorImageData;
+    document.getElementById('newFloorPreview').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+function handleAddFloor() {
+  const name = document.getElementById('newFloorName').value.trim();
+  if (!name) { showToast('请输入楼层名称'); return; }
+  if (!newFloorImageData) { showToast('请选择图片'); return; }
+  addFloorImg(name, newFloorImageData);
+  closeAddFloorDialog();
+  showToast('户型图已添加');
+}
+
+function closeAddFloorDialog() {
+  const dialog = document.getElementById('addFloorDialog');
+  if (dialog) dialog.remove();
+  newFloorImageData = null;
+}
+
 function renderFloorPlan() {
   const wrap = document.getElementById('floorWrap');
   const f = currentFamily();
-  const items = currentItems().filter(i=>i.xPct!=null && i.yPct!=null);
+  const floorImg = currentFloorImg();
+  const currentFloorId = floorImg ? floorImg.id : '';
+  const items = currentItems().filter(i => i.xPct != null && i.yPct != null && i.floorImgId === currentFloorId);
 
   // 保存 pending marker
   const pending = wrap.querySelector('.marker-pending');
 
   wrap.innerHTML = '';
 
-  if (f && f.floorImg) {
+  // 创建内部容器用于缩放
+  const inner = document.createElement('div');
+  inner.className = 'floor-wrap-inner';
+  inner.style.transform = `translate(${floorTranslateX}px, ${floorTranslateY}px) scale(${floorScale})`;
+
+  if (floorImg && floorImg.img) {
     const img = document.createElement('img');
-    img.src = f.floorImg;
+    img.src = floorImg.img;
     img.alt = '户型图';
-    wrap.appendChild(img);
+    inner.appendChild(img);
     document.getElementById('floorPlaceholder')?.remove();
   } else if (!document.getElementById('floorPlaceholder')) {
     // wrap 里已经有 placeholder 了
@@ -514,9 +1802,10 @@ function renderFloorPlan() {
     m.className = 'marker';
     m.style.left = item.xPct + '%';
     m.style.top = item.yPct + '%';
-    m.innerHTML = `<div class="marker-dot"></div><div class="marker-label">${escHtml(item.name)}</div>`;
+    const markerColor = getMarkerColor(item.expiryDate);
+    m.innerHTML = `<div class="marker-dot" style="background:${markerColor};"></div><div class="marker-label">${escHtml(item.name)}</div>`;
     m.onclick = (e) => { e.stopPropagation(); showItemDetail(item.id); };
-    wrap.appendChild(m);
+    inner.appendChild(m);
   });
 
   // 恢复 pending marker
@@ -526,8 +1815,20 @@ function renderFloorPlan() {
     pm.style.left = pendingPos.x + '%';
     pm.style.top = pendingPos.y + '%';
     pm.innerHTML = '<div class="marker-dot"></div><div class="marker-label">新位置</div>';
-    wrap.appendChild(pm);
+    inner.appendChild(pm);
   }
+
+  wrap.appendChild(inner);
+
+  // 添加缩放控制按钮
+  const zoomDiv = document.createElement('div');
+  zoomDiv.className = 'floor-zoom-controls';
+  zoomDiv.innerHTML = `
+    <div class="floor-zoom-btn" onclick="event.stopPropagation();zoomFromCenter(0.2)">＋</div>
+    <div class="floor-zoom-btn" onclick="event.stopPropagation();zoomFromCenter(-0.2)">－</div>
+    <div class="floor-zoom-btn" onclick="event.stopPropagation();resetZoom()">⟲</div>
+  `;
+  wrap.appendChild(zoomDiv);
 
   // 图例
   const legend = document.getElementById('markerLegend');
@@ -538,13 +1839,185 @@ function renderFloorPlan() {
   } else {
     legend.style.display = 'none';
   }
+  
+  // 应用当前缩放状态到所有标记点（包括新创建的）
+  applyFloorTransform();
+}
+
+// ---------- 户型图缩放 ----------
+let floorScale = 1;
+let floorTranslateX = 0;
+let floorTranslateY = 0;
+let hasDragged = false;
+
+function zoomFloor(delta, centerX, centerY) {
+  const oldScale = floorScale;
+  const newScale = Math.max(0.5, Math.min(30, floorScale + delta));
+
+  if (centerX !== undefined && centerY !== undefined) {
+    // 以鼠标位置为中心缩放
+    floorTranslateX = centerX - (centerX - floorTranslateX) * (newScale / oldScale);
+    floorTranslateY = centerY - (centerY - floorTranslateY) * (newScale / oldScale);
+  }
+
+  floorScale = newScale;
+  applyFloorTransform();
+}
+
+function resetZoom() {
+  floorScale = 1;
+  floorTranslateX = 0;
+  floorTranslateY = 0;
+  applyFloorTransform();
+}
+
+function applyFloorTransform() {
+  const inner = document.querySelector('.floor-wrap-inner');
+  if (inner) {
+    inner.style.transform = `translate(${floorTranslateX}px, ${floorTranslateY}px) scale(${floorScale})`;
+    // 标记点反向缩放，保持视觉大小恒定
+    const invScale = 1 / floorScale;
+    inner.querySelectorAll('.marker').forEach(m => {
+      m.style.transform = `translate(-50%,-50%) scale(${invScale})`;
+    });
+  }
+}
+
+function zoomFromCenter(delta) {
+  const wrap = document.getElementById('floorWrap');
+  if (wrap) {
+    const rect = wrap.getBoundingClientRect();
+    zoomFloor(delta, rect.width / 2, rect.height / 2);
+  }
+}
+
+// 鼠标滚轮缩放
+document.addEventListener('DOMContentLoaded', () => {
+  const floorWrap = document.getElementById('floorWrap');
+  if (floorWrap) {
+    floorWrap.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = floorWrap.getBoundingClientRect();
+      const centerX = e.clientX - rect.left;
+      const centerY = e.clientY - rect.top;
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      zoomFloor(delta, centerX, centerY);
+    }, { passive: false });
+
+    // 触摸缩放（双指）
+    let initialDistance = 0;
+    let initialScale = 1;
+    let initialTranslateX = 0;
+    let initialTranslateY = 0;
+
+    floorWrap.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        initialDistance = getDistance(e.touches[0], e.touches[1]);
+        initialScale = floorScale;
+        initialTranslateX = floorTranslateX;
+        initialTranslateY = floorTranslateY;
+      }
+    }, { passive: false });
+
+    floorWrap.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const rect = floorWrap.getBoundingClientRect();
+        const dist = getDistance(e.touches[0], e.touches[1]);
+        const ratio = dist / initialDistance;
+        const newScale = Math.max(0.5, Math.min(30, initialScale * ratio));
+
+        // 计算双指中心点
+        const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+        const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+
+        // 以中心点缩放
+        floorTranslateX = centerX - (centerX - initialTranslateX) * (newScale / initialScale);
+        floorTranslateY = centerY - (centerY - initialTranslateY) * (newScale / initialScale);
+        floorScale = newScale;
+        applyFloorTransform();
+      }
+    }, { passive: false });
+
+    // 拖拽平移
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragStartTranslateX = 0;
+    let dragStartTranslateY = 0;
+
+    floorWrap.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      hasDragged = false;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dragStartTranslateX = floorTranslateX;
+      dragStartTranslateY = floorTranslateY;
+      floorWrap.classList.add('dragging');
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - dragStartX;
+      const dy = e.clientY - dragStartY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDragged = true;
+      floorTranslateX = dragStartTranslateX + dx;
+      floorTranslateY = dragStartTranslateY + dy;
+      applyFloorTransform();
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        floorWrap.classList.remove('dragging');
+      }
+    });
+
+    // 触摸拖拽（单指）
+    let touchDragStartX = 0;
+    let touchDragStartY = 0;
+    let touchDragStartTX = 0;
+    let touchDragStartTY = 0;
+
+    floorWrap.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        touchDragStartX = e.touches[0].clientX;
+        touchDragStartY = e.touches[0].clientY;
+        touchDragStartTX = floorTranslateX;
+        touchDragStartTY = floorTranslateY;
+      }
+    }, { passive: true });
+
+    floorWrap.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1) {
+        const dx = e.touches[0].clientX - touchDragStartX;
+        const dy = e.touches[0].clientY - touchDragStartY;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDragged = true;
+        floorTranslateX = touchDragStartTX + dx;
+        floorTranslateY = touchDragStartTY + dy;
+        applyFloorTransform();
+      }
+    }, { passive: true });
+  }
+});
+
+function getDistance(t1, t2) {
+  return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
 }
 
 function handleFloorClick(event) {
+  if (hasDragged) { hasDragged = false; return; }
+
   const wrap = document.getElementById('floorWrap');
   const rect = wrap.getBoundingClientRect();
-  const xPct = ((event.clientX - rect.left) / rect.width * 100);
-  const yPct = ((event.clientY - rect.top) / rect.height * 100);
+
+  // 考虑缩放偏移计算点击位置
+  const clickX = event.clientX - rect.left;
+  const clickY = event.clientY - rect.top;
+  const xPct = ((clickX - floorTranslateX) / (rect.width * floorScale) * 100);
+  const yPct = ((clickY - floorTranslateY) / (rect.height * floorScale) * 100);
 
   if (xPct < 0 || xPct > 100 || yPct < 0 || yPct > 100) return;
 
@@ -570,6 +2043,7 @@ function confirmAdd() {
   item.xPct = pendingPos.x;
   item.yPct = pendingPos.y;
   item.familyId = appData.currentFamilyId;
+  item.floorImgId = currentFloorImg()?.id || '';
   item.id = genId();
   item.createdAt = Date.now();
   appData.items.push(item);
@@ -585,7 +2059,8 @@ function confirmAdd() {
 // ---------- 物品表单 ----------
 function buildItemForm(item) {
   const i = item || {};
-  const catOptions = CATEGORIES.map(c =>
+  const allCats = getAllCategories();
+  const catOptions = allCats.map(c =>
     `<div class="cat-btn ${i.cat===c.key?'selected':''}" data-cat="${c.key}" onclick="selectCat(this)">
       <span>${c.icon}</span><span>${c.label}</span>
     </div>`
@@ -601,6 +2076,8 @@ function buildItemForm(item) {
     <input type="text" id="itemLoc" placeholder="例如：厨房橱柜第二层" value="${escHtml(i.loc||'')}">
     <label>备注</label>
     <textarea id="itemDesc" placeholder="补充说明…">${escHtml(i.desc||'')}</textarea>
+    <label>保质期（可选）</label>
+    <input type="date" id="itemExpiry" value="${i.expiryDate||''}">
     <label>照片</label>
     <div class="photo-upload" id="photoUpload" onclick="document.getElementById('itemPhotoInput').click()">
       <div id="photoPreview" style="width:100%;height:100%;display:${i.photo?'block':'none'};">
@@ -656,9 +2133,10 @@ function readItemForm(formId) {
   const cat = document.getElementById('itemCat')?.value || 'other';
   const loc = document.getElementById('itemLoc')?.value?.trim() || '';
   const desc = document.getElementById('itemDesc')?.value?.trim() || '';
+  const expiryDate = document.getElementById('itemExpiry')?.value || '';
   const photoEl = document.getElementById('photoPreview')?.querySelector('img');
   const photo = photoEl ? photoEl.src : '';
-  return { name, cat, loc, desc, photo };
+  return { name, cat, loc, desc, expiryDate, photo };
 }
 
 // ---------- 物品增删改查 ----------
@@ -689,27 +2167,83 @@ function closeDrawer() {
   editingId = null;
 }
 
-function saveItem() {
+async function saveItem() {
   const formData = readItemForm('drawerForm');
   if (!formData) return;
 
-  if (editingId) {
-    const item = appData.items.find(i=>i.id===editingId);
-    if (item) {
-      Object.assign(item, formData);
-      item.updatedAt = Date.now();
+  const btn = document.getElementById('drawerSaveBtn');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+
+  try {
+    if (editingId) {
+      // 编辑模式：更新到Supabase
+      const { error } = await supabaseClient
+        .from(SUPABASE_CONFIG.tables.items)
+        .update({
+          name: formData.name,
+          cat: formData.cat,
+          loc: formData.loc,
+          desc: formData.desc,
+          photo: formData.photo,
+          expiry_date: formData.expiryDate || null
+        })
+        .eq('id', editingId);
+
+      if (error) throw error;
+
+      // 更新本地缓存
+      const item = appData.items.find(i=>i.id===editingId);
+      if (item) {
+        Object.assign(item, formData);
+        item.updatedAt = Date.now();
+      }
+    } else {
+      // 新增模式：插入到Supabase
+      const newItem = {
+        id: genId(),
+        family_id: appData.currentFamilyId,
+        name: formData.name,
+        cat: formData.cat,
+        loc: formData.loc,
+        desc: formData.desc,
+        photo: formData.photo,
+        expiry_date: formData.expiryDate || null,
+        created_by: currentUser.id,
+        created_at: new Date().toISOString()
+      };
+
+      const { error } = await supabaseClient
+        .from(SUPABASE_CONFIG.tables.items)
+        .insert(newItem);
+
+      if (error) throw error;
+
+      // 添加到本地缓存
+      appData.items.push({
+        id: newItem.id,
+        familyId: newItem.family_id,
+        name: newItem.name,
+        cat: newItem.cat,
+        loc: newItem.loc,
+        desc: newItem.desc,
+        photo: newItem.photo,
+        expiryDate: newItem.expiry_date,
+        createdAt: new Date(newItem.created_at).getTime()
+      });
     }
-  } else {
-    formData.id = genId();
-    formData.familyId = appData.currentFamilyId;
-    formData.createdAt = Date.now();
-    appData.items.push(formData);
+
+    closeDrawer();
+    renderItemList();
+    renderFloorPlan();
+    showToast(editingId ? '物品已更新' : '物品已添加');
+  } catch (e) {
+    console.error('[Item] 保存失败:', e);
+    showToast('保存失败：' + (e.message || '网络错误'));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存';
   }
-  saveData(appData);
-  closeDrawer();
-  renderItemList();
-  renderFloorPlan();
-  showToast(editingId ? '物品已更新' : '物品已添加');
 }
 
 function showItemDetail(id) {
@@ -722,11 +2256,12 @@ function showItemDetail(id) {
 
   // 生成户型图缩略图（如果有位置标记）
   let floorThumb = '';
-  if (hasLocation && f && f.floorImg) {
+  const floorImg = currentFloorImg();
+  if (hasLocation && floorImg && floorImg.img) {
     floorThumb = `
       <div style="margin-bottom:16px;border-radius:12px;overflow:hidden;border:0.5px solid var(--border);position:relative;cursor:pointer;"
            onclick="closeDetail();switchTab('map');highlightMarker('${item.id}')">
-        <img src="${f.floorImg}" style="width:100%;height:140px;object-fit:cover;filter:brightness(0.95);">
+        <img src="${floorImg.img}" style="width:100%;height:140px;object-fit:cover;filter:brightness(0.95);">
         <div style="position:absolute;left:${item.xPct}%;top:${item.yPct}%;transform:translate(-50%,-50%);z-index:10;">
           <div style="width:20px;height:20px;border-radius:50%;background:var(--primary-dark);border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);animation:pulse 1.2s infinite;"></div>
         </div>
@@ -735,10 +2270,10 @@ function showItemDetail(id) {
         </div>
       </div>
     `;
-  } else if (hasLocation && (!f || !f.floorImg)) {
+  } else if (hasLocation && (!floorImg || !floorImg.img)) {
     floorThumb = `
       <div style="margin-bottom:16px;padding:12px;background:var(--amber-light);border-radius:8px;font-size:12px;color:var(--amber);display:flex;align-items:center;gap:6px;">
-        <span>📍</span> 该物品已在户型图标记位置，但当前家庭组尚未上传户型图
+        <span>📍</span> 该物品已在户型图标记位置，但当前楼层尚未上传户型图
       </div>
     `;
   }
@@ -750,13 +2285,15 @@ function showItemDetail(id) {
     </div>
     ${floorThumb}
     <div style="font-size:18px;font-weight:500;margin-bottom:8px;">${escHtml(item.name)}</div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
       <span class="tag tag-primary">${cat.icon} ${cat.label}</span>
       ${item.loc ? `<span class="tag tag-amber">📍 ${escHtml(item.loc)}</span>` : ''}
+      ${item.expiryDate ? `<span class="tag ${getExpiryTagClass(item.expiryDate)}">⏰ ${getExpiryStatusLabel(item.expiryDate)}</span>` : ''}
     </div>
     ${item.desc ? `<div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:12px;">${escHtml(item.desc)}</div>` : ''}
     <div style="font-size:11px;color:var(--text2);">
       添加时间: ${new Date(item.createdAt).toLocaleString('zh-CN')}
+      ${item.expiryDate ? ' · 保质期至: ' + item.expiryDate : ''}
       ${hasLocation ? ' · 已在户型图标记位置' : ''}
     </div>
   `;
@@ -814,14 +2351,17 @@ function renderCatFilter() {
   const el = document.getElementById('catFilter');
   const counts = {};
   currentItems().forEach(i => { counts[i.cat] = (counts[i.cat]||0) + 1; });
+  const allCats = getAllCategories();
 
-  el.innerHTML = `<div class="cat-btn ${currentCatFilter==='all'?'selected':''}" onclick="filterCat('all')" style="padding:8px 12px;font-size:12px;white-space:nowrap;">
-    全部 (${currentItems().length})
-  </div>` + CATEGORIES.map(c =>
-    `<div class="cat-btn ${currentCatFilter===c.key?'selected':''}" onclick="filterCat('${c.key}')" style="padding:8px 12px;font-size:12px;white-space:nowrap;">
-      ${c.icon} ${c.label} (${counts[c.key]||0})
-    </div>`
-  ).join('');
+  // 构建下拉选项
+  let options = `<option value="all">全部 (${currentItems().length})</option>`;
+  allCats.forEach(c => {
+    options += `<option value="${c.key}" ${currentCatFilter===c.key?'selected':''}>${c.icon} ${c.label} (${counts[c.key]||0})</option>`;
+  });
+
+  el.innerHTML = `<select onchange="filterCat(this.value)" style="width:100%;padding:10px 12px;font-size:14px;border-radius:8px;border:0.5px solid var(--border);background:var(--card);color:var(--text);cursor:pointer;">
+    ${options}
+  </select>`;
 }
 
 function filterCat(key) {
@@ -847,6 +2387,7 @@ function renderItemList() {
 
   list.innerHTML = items.map(item => {
     const cat = catInfo(item.cat);
+    const expiryTag = item.expiryDate ? `<span class="tag ${getExpiryTagClass(item.expiryDate)}" style="margin-left:4px;font-size:11px;">${getExpiryStatusLabel(item.expiryDate)}</span>` : '';
     return `<div class="item-card" onclick="showItemDetail('${item.id}')">
       <div class="item-thumb">
         ${item.photo ? `<img src="${item.photo}">` : cat.icon}
@@ -856,43 +2397,93 @@ function renderItemList() {
         <div class="item-meta">
           <span class="tag tag-primary" style="margin-right:4px;">${cat.icon} ${cat.label}</span>
           ${item.loc ? escHtml(item.loc) : ''}
+          ${expiryTag}
         </div>
       </div>
-      ${item.xPct!=null ? '<div style="color:var(--primary);font-size:16px;">📍</div>' : ''}
+      ${item.xPct!=null ? `<div style="color:${getMarkerColor(item.expiryDate)};font-size:16px;">📍</div>` : ''}
     </div>`;
   }).join('');
 }
 
 // ---------- 搜索 ----------
+// ---------- 保质期筛选 ----------
+let currentExpiryFilter = 'all';
+
+function setExpiryFilter(filter, btn) {
+  currentExpiryFilter = filter;
+  document.querySelectorAll('#expiryFilter .filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  doSearch();
+}
+
+function matchExpiryFilter(item, filter) {
+  if (filter === 'all') return true;
+  const status = getExpiryStatus(item.expiryDate);
+  if (filter === 'expired') return status === 'expired';
+  if (filter === '30days') return status === 'expired' || status === 'expiring';
+  if (filter === '90days') {
+    const days = getDaysUntilExpiry(item.expiryDate);
+    return status === 'expired' || days <= 90;
+  }
+  return true;
+}
+
 function doSearch() {
   const q = document.getElementById('searchInput').value.trim().toLowerCase();
   const hint = document.getElementById('searchHint');
   const list = document.getElementById('searchList');
 
-  if (!q) {
-    hint.textContent = '输入关键词查找物品';
-    list.innerHTML = '';
-    return;
+  let results = currentItems();
+
+  // 关键词搜索
+  if (q) {
+    results = results.filter(i =>
+      i.name.toLowerCase().includes(q) ||
+      (i.loc && i.loc.toLowerCase().includes(q)) ||
+      (i.desc && i.desc.toLowerCase().includes(q))
+    );
   }
 
-  const results = currentItems().filter(i =>
-    i.name.toLowerCase().includes(q) ||
-    (i.loc && i.loc.toLowerCase().includes(q)) ||
-    (i.desc && i.desc.toLowerCase().includes(q))
-  );
+  // 保质期筛选
+  results = results.filter(i => matchExpiryFilter(i, currentExpiryFilter));
+
+  if (!q && currentExpiryFilter === 'all') {
+    // 显示所有物品
+    hint.textContent = `共 ${results.length} 个物品`;
+    list.innerHTML = results.map(item => {
+      const cat = catInfo(item.cat);
+      const expiryTag = item.expiryDate ? `<span class="tag ${getExpiryTagClass(item.expiryDate)}" style="margin-left:4px;">${getExpiryStatusLabel(item.expiryDate)}</span>` : '';
+      return `<div class="item-card" onclick="showItemDetail('${item.id}')">
+        <div class="item-thumb">
+          ${item.photo ? `<img src="${item.photo}">` : cat.icon}
+        </div>
+        <div class="item-info">
+          <div class="item-name">${escHtml(item.name)}</div>
+          <div class="item-meta">
+            <span class="tag tag-primary" style="margin-right:4px;">${cat.icon} ${cat.label}</span>
+            ${item.loc ? escHtml(item.loc) : ''}
+            ${expiryTag}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    return;
+  }
 
   hint.textContent = `找到 ${results.length} 个结果`;
   list.innerHTML = results.map(item => {
     const cat = catInfo(item.cat);
+    const expiryTag = item.expiryDate ? `<span class="tag ${getExpiryTagClass(item.expiryDate)}" style="margin-left:4px;">${getExpiryStatusLabel(item.expiryDate)}</span>` : '';
     return `<div class="item-card" onclick="showItemDetail('${item.id}')">
       <div class="item-thumb">
         ${item.photo ? `<img src="${item.photo}">` : cat.icon}
       </div>
       <div class="item-info">
-        <div class="item-name">${hl(item.name, q)}</div>
+        <div class="item-name">${q ? hl(item.name, q) : escHtml(item.name)}</div>
         <div class="item-meta">
           <span class="tag tag-primary" style="margin-right:4px;">${cat.icon} ${cat.label}</span>
-          ${item.loc ? hl(item.loc, q) : ''}
+          ${item.loc ? (q ? hl(item.loc, q) : escHtml(item.loc)) : ''}
+          ${expiryTag}
         </div>
       </div>
     </div>`;
@@ -914,9 +2505,22 @@ function renderMinePage() {
   const located = items.filter(i=>i.xPct!=null).length;
   const cats = new Set(items.map(i=>i.cat)).size;
 
+  // 更新统计
   document.getElementById('statTotal').textContent = items.length;
   document.getElementById('statCats').textContent = cats;
   document.getElementById('statLocated').textContent = located;
+  document.getElementById('catCount').textContent = getAllCategories().length;
+
+  // 用户信息卡片
+  const userCard = document.getElementById('userCard');
+  if (currentUser) {
+    userCard.style.display = 'block';
+    const displayName = currentUser.user_metadata?.display_name || currentUser.email;
+    document.getElementById('userDisplayName').textContent = displayName;
+    document.getElementById('userEmail').textContent = currentUser.email;
+  } else {
+    userCard.style.display = 'none';
+  }
 
   // 家庭组
   const section = document.getElementById('familySection');
@@ -934,7 +2538,109 @@ function renderMinePage() {
     </div>
   `).join('') + `
     <button class="btn" style="width:100%;margin-top:10px;" onclick="addFamily()">＋ 新建家庭组</button>
+    <div id="familyMembersSection" style="margin-top:16px;"></div>
   `;
+
+  // 加载家庭成员
+  loadFamilyMembers();
+
+  // 邀请码
+  const inviteCard = document.getElementById('inviteCard');
+  const f = currentFamily();
+  if (f) {
+    const inviteCode = f.inviteCode || genCode();
+    if (!f.inviteCode) { f.inviteCode = inviteCode; saveData(appData); }
+    document.getElementById('inviteCodeDisplay').value = inviteCode;
+    inviteCard.style.display = 'block';
+  } else {
+    inviteCard.style.display = 'none';
+  }
+
+  // 深色模式开关
+  initDarkMode();
+}
+
+// ---------- 家庭成员管理 ----------
+async function loadFamilyMembers() {
+  const membersSection = document.getElementById('familyMembersSection');
+  if (!membersSection) return;
+
+  const family = currentFamily();
+  if (!family) {
+    membersSection.innerHTML = '';
+    return;
+  }
+
+  // 如果是云同步模式，从Supabase加载成员
+  if (supabaseClient && family.id && !family.id.startsWith('local_')) {
+    try {
+      const members = await getFamilyMembers(family.id);
+      if (members && members.length > 0) {
+        membersSection.innerHTML = `
+          <div style="font-size:13px;font-weight:500;color:var(--text2);margin-bottom:8px;">家庭成员 (${members.length}人)</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            ${members.map(m => `
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg);border-radius:8px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="width:32px;height:32px;border-radius:50%;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-size:16px;">
+                    ${m.role === 'owner' ? '👑' : '👤'}
+                  </div>
+                  <div>
+                    <div style="font-size:13px;font-weight:500;">${escHtml(m.profiles?.display_name || m.user_id?.slice(0, 8) || '未知用户')}</div>
+                    <div style="font-size:11px;color:var(--text2);">${m.role === 'owner' ? '管理员' : '成员'} · 加入于 ${new Date(m.joined_at).toLocaleDateString('zh-CN')}</div>
+                  </div>
+                </div>
+                ${m.role !== 'owner' && currentUser && isFamilyOwner(family.id) ? `
+                  <button class="btn btn-ghost" style="font-size:11px;padding:4px 8px;color:var(--danger);" onclick="removeFamilyMember('${family.id}', '${m.user_id}')">移除</button>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+        `;
+        return;
+      }
+    } catch (e) {
+      console.error('[Members] 加载成员失败:', e);
+    }
+  }
+
+  // 本地模式或无成员时，显示邀请提示
+  membersSection.innerHTML = `
+    <div style="font-size:13px;font-weight:500;color:var(--text2);margin-bottom:8px;">家庭成员</div>
+    <div style="text-align:center;padding:12px;background:var(--bg);border-radius:8px;font-size:13px;color:var(--text2);">
+      <div style="font-size:24px;margin-bottom:6px;">👨‍👩‍👧‍👦</div>
+      分享邀请码邀请家人加入
+    </div>
+  `;
+}
+
+function isFamilyOwner(familyId) {
+  // 检查当前用户是否是家庭所有者
+  // 简单判断：第一个家庭的所有者是创建者
+  if (appData.families.length > 0 && appData.families[0].id === familyId) {
+    return true;
+  }
+  return false;
+}
+
+async function removeFamilyMember(familyId, userId) {
+  if (!confirm('确定要移除该成员吗？')) return;
+
+  try {
+    const { error } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.familyMembers)
+      .delete()
+      .eq('family_id', familyId)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    showToast('成员已移除');
+    loadFamilyMembers();
+  } catch (e) {
+    console.error('[Members] 移除成员失败:', e);
+    showToast('移除失败：' + (e.message || '未知错误'));
+  }
 }
 
 // ---------- 数据导入导出 ----------
@@ -998,17 +2704,149 @@ function closeFamilyModal() {
   document.getElementById('familyDrawer').classList.remove('show');
 }
 
+// ---------- 分类管理 ----------
+let editingCategoryKey = null;
+
+function showCategoryManager() {
+  renderCategoryList();
+  document.getElementById('categoryOverlay').classList.add('show');
+  document.getElementById('categoryDrawer').classList.add('show');
+}
+
+function closeCategoryManager() {
+  document.getElementById('categoryOverlay').classList.remove('show');
+  document.getElementById('categoryDrawer').classList.remove('show');
+  editingCategoryKey = null;
+}
+
+function renderCategoryList() {
+  const list = document.getElementById('categoryList');
+  const allCats = getAllCategories();
+
+  list.innerHTML = allCats.map(cat => {
+    const isDefault = CATEGORIES.some(c => c.key === cat.key);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border);">
+      <div style="font-size:24px;">${cat.icon}</div>
+      <div style="flex:1;font-size:14px;">${escHtml(cat.label)}</div>
+      ${isDefault
+        ? '<span style="font-size:11px;color:var(--text2);">默认</span>'
+        : `<button class="btn btn-ghost" style="font-size:12px;padding:4px 8px;" onclick="showEditCategoryDialog('${cat.key}','${cat.icon}','${escHtml(cat.label)}')">✏️</button>
+           <button class="btn btn-ghost" style="font-size:12px;padding:4px 8px;color:var(--danger);" onclick="handleDeleteCategory('${cat.key}')">🗑️</button>`
+      }
+    </div>`;
+  }).join('');
+}
+
+function showAddCategoryDialog() {
+  editingCategoryKey = null;
+  const icons = ['📦','🎯','🎁','💊','🧴','🧹','🔧','🎮','📱','🔑','📎','🛒'];
+  const dialog = document.createElement('div');
+  dialog.className = 'overlay show';
+  dialog.style.zIndex = '500';
+  dialog.id = 'catDialog';
+  dialog.innerHTML = `
+    <div class="drawer show" style="max-height:80vh;">
+      <div class="drawer-handle"></div>
+      <div class="drawer-title">添加分类</div>
+      <label style="margin-top:0;">选择图标</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;" id="iconPicker">
+        ${icons.map(icon => `<div class="cat-btn" style="width:40px;height:40px;font-size:20px;cursor:pointer;" onclick="selectIcon(this,'${icon}')">${icon}</div>`).join('')}
+      </div>
+      <input type="hidden" id="newCatIcon" value="${icons[0]}">
+      <label>分类名称</label>
+      <input type="text" id="newCatLabel" placeholder="例如：工具" maxlength="10">
+      <div style="display:flex;gap:10px;margin-top:20px;">
+        <button class="btn" style="flex:1" onclick="closeCatDialog()">取消</button>
+        <button class="btn btn-primary" style="flex:2" onclick="handleAddCategory()">添加</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+}
+
+function showEditCategoryDialog(key, icon, label) {
+  editingCategoryKey = key;
+  const icons = ['📦','🎯','🎁','💊','🧴','🧹','🔧','🎮','📱','🔑','📎','🛒'];
+  const dialog = document.createElement('div');
+  dialog.className = 'overlay show';
+  dialog.style.zIndex = '500';
+  dialog.id = 'catDialog';
+  dialog.innerHTML = `
+    <div class="drawer show" style="max-height:80vh;">
+      <div class="drawer-handle"></div>
+      <div class="drawer-title">编辑分类</div>
+      <label style="margin-top:0;">选择图标</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;" id="iconPicker">
+        ${icons.map(i => `<div class="cat-btn ${i===icon?'selected':''}" style="width:40px;height:40px;font-size:20px;cursor:pointer;" onclick="selectIcon(this,'${i}')">${i}</div>`).join('')}
+      </div>
+      <input type="hidden" id="newCatIcon" value="${icon}">
+      <label>分类名称</label>
+      <input type="text" id="newCatLabel" placeholder="分类名称" maxlength="10" value="${escHtml(label)}">
+      <div style="display:flex;gap:10px;margin-top:20px;">
+        <button class="btn" style="flex:1" onclick="closeCatDialog()">取消</button>
+        <button class="btn btn-primary" style="flex:2" onclick="handleEditCategory()">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+}
+
+function selectIcon(el, icon) {
+  el.parentElement.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('newCatIcon').value = icon;
+}
+
+function closeCatDialog() {
+  const dialog = document.getElementById('catDialog');
+  if (dialog) dialog.remove();
+  editingCategoryKey = null;
+}
+
+function handleAddCategory() {
+  const icon = document.getElementById('newCatIcon').value;
+  const label = document.getElementById('newCatLabel').value.trim();
+  if (!label) { showToast('请输入分类名称'); return; }
+  addCustomCategory(icon, label);
+  closeCatDialog();
+  renderCategoryList();
+  renderCatFilter();
+  renderMinePage();
+  showToast('分类已添加');
+}
+
+function handleEditCategory() {
+  if (!editingCategoryKey) return;
+  const icon = document.getElementById('newCatIcon').value;
+  const label = document.getElementById('newCatLabel').value.trim();
+  if (!label) { showToast('请输入分类名称'); return; }
+  editCustomCategory(editingCategoryKey, icon, label);
+  closeCatDialog();
+  renderCategoryList();
+  renderCatFilter();
+  showToast('分类已更新');
+}
+
+function handleDeleteCategory(key) {
+  if (!confirm('确定删除该分类吗？')) return;
+  deleteCustomCategory(key);
+  renderCategoryList();
+  renderCatFilter();
+  showToast('分类已删除');
+}
+
 // ---------- 初始化 ----------
 function init() {
   ensureFamily();
   renderFloorPlan();
+  renderFloorTabs();
   renderItemList();
   renderMinePage();
 
   // 如果没有户型图，显示 placeholder
   const wrap = document.getElementById('floorWrap');
-  const f = currentFamily();
-  if (!f || !f.floorImg) {
+  const floorImg = currentFloorImg();
+  if (!floorImg || !floorImg.img) {
     if (!wrap.querySelector('.floor-placeholder')) {
       const ph = document.createElement('div');
       ph.className = 'floor-placeholder';
@@ -1018,9 +2856,21 @@ function init() {
       wrap.appendChild(ph);
     }
   }
+
+  // 显示用户信息（如果已登录）
+  updateUserInfo();
+  initDarkMode();
 }
 
-init();
+function updateUserInfo() {
+  const badge = document.getElementById('familyNameBadge');
+  if (currentUser) {
+    const displayName = currentUser.user_metadata?.display_name || currentUser.email;
+    badge.textContent = displayName + ' | ' + (currentFamily()?.name || '');
+  } else {
+    badge.textContent = currentFamily()?.name || '';
+  }
+}
 
 // ---------- PWA：注册 Service Worker ----------
 if ('serviceWorker' in navigator) {
