@@ -1,5 +1,5 @@
 // 家居收纳管家 - Service Worker
-const CACHE_NAME = 'home-storage-v6';
+const CACHE_NAME = 'home-storage-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -30,23 +30,34 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// 请求拦截：缓存优先，网络回退
+// 请求拦截：网络优先（HTML），缓存优先（其他资源）
 self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
-        // 缓存新请求
-        if (response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
+  const url = new URL(event.request.url);
+  const isHtml = event.request.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname.endsWith('/');
+
+  if (isHtml) {
+    // HTML页面：网络优先
+    event.respondWith(
+      fetch(event.request).then((response) => {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
         return response;
-      });
-    }).catch(() => {
-      // 离线回退
-      if (event.request.mode === 'navigate') {
-        return caches.match('./index.html');
-      }
-    })
-  );
+      }).catch(() => {
+        return caches.match(event.request);
+      })
+    );
+  } else {
+    // 其他资源：缓存优先
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        return cached || fetch(event.request).then((response) => {
+          if (response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          }
+          return response;
+        });
+      })
+    );
+  }
 });
