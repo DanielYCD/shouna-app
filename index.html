@@ -6,6 +6,7 @@
 <title>家居收纳管家</title>
 <meta name="theme-color" content="#3ECF8E">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="收纳管家">
 <link rel="manifest" href="manifest.json">
@@ -604,9 +605,11 @@ async function handleLogin() {
     currentSession = data.session;
     currentUser = data.user;
 
-    // 从云端加载数据
+    // 显示骨架屏
     btn.textContent = '加载数据...';
+    showSkeleton();
     const loadSuccess = await loadAllDataFromCloud();
+    hideSkeleton();
     if (!loadSuccess) {
       throw new Error('加载云端数据失败');
     }
@@ -696,7 +699,9 @@ async function handleRegister() {
 
     // 从云端加载数据
     btn.textContent = '加载数据...';
+    showSkeleton();
     const loadSuccess = await loadAllDataFromCloud();
+    hideSkeleton();
     if (!loadSuccess) {
       throw new Error('加载云端数据失败');
     }
@@ -752,6 +757,35 @@ function skipAuth() {
   enterMainApp();
 }
 
+function showSkeleton() {
+  document.getElementById('authPage').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'block';
+  // 主区域显示骨架屏
+  const skeleton = document.createElement('div');
+  skeleton.id = 'appSkeleton';
+  skeleton.style.cssText = 'padding:16px;';
+  skeleton.innerHTML = `
+    <div style="background:var(--card);border-radius:12px;padding:16px;margin-bottom:12px;">
+      <div style="height:18px;width:60%;background:var(--bg);border-radius:4px;margin-bottom:12px;animation:pulse 1.2s infinite;"></div>
+      <div style="height:200px;background:var(--bg);border-radius:8px;animation:pulse 1.2s infinite;"></div>
+    </div>
+    <div style="background:var(--card);border-radius:12px;padding:16px;">
+      <div style="height:18px;width:40%;background:var(--bg);border-radius:4px;margin-bottom:12px;animation:pulse 1.2s infinite;"></div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="height:60px;background:var(--bg);border-radius:8px;animation:pulse 1.2s infinite;"></div>
+        <div style="height:60px;background:var(--bg);border-radius:8px;animation:pulse 1.2s infinite;"></div>
+      </div>
+    </div>
+    <style>@keyframes pulse { 0%,100%{opacity:.6} 50%{opacity:1} }</style>
+  `;
+  document.getElementById('mainApp').appendChild(skeleton);
+}
+
+function hideSkeleton() {
+  const sk = document.getElementById('appSkeleton');
+  if (sk) sk.remove();
+}
+
 function enterMainApp() {
   document.getElementById('authPage').style.display = 'none';
   document.getElementById('mainApp').style.display = 'block';
@@ -765,9 +799,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (supabaseReady) {
     const isLoggedIn = await checkAuthState();
     if (isLoggedIn) {
-      // 从云端加载数据
-      await loadAllDataFromCloud();
-      enterMainApp();
+      // 自动登录：显示骨架屏避免白屏
+      showSkeleton();
+      const ok = await loadAllDataFromCloud();
+      hideSkeleton();
+      if (ok) {
+        enterMainApp();
+      } else {
+        showAuthPage();
+        showToast('加载数据失败，请重新登录');
+      }
     } else {
       showAuthPage();
       checkLegacyData();
@@ -1132,16 +1173,19 @@ async function loadAllDataFromCloud() {
     appData.families = allFamilies.map(f => ({
       id: f.id,
       name: f.name,
+      ownerId: f.owner_id,
       inviteCode: f.invite_code,
       floorImgs: f.floor_imgs || [],
       currentFloorImgId: f.current_floor_img_id || '',
       createdAt: new Date(f.created_at).getTime()
     }));
 
-    // 6. 设置当前家庭组
+    // 6. 设置当前家庭组（恢复用户上次选择）
     if (appData.families.length > 0) {
+      const savedFamilyId = (() => { try { return localStorage.getItem('lastFamilyId'); } catch (e) { return null; } })();
+      const savedExists = savedFamilyId && appData.families.find(f => f.id === savedFamilyId);
       if (!appData.currentFamilyId || !appData.families.find(f => f.id === appData.currentFamilyId)) {
-        appData.currentFamilyId = appData.families[0].id;
+        appData.currentFamilyId = savedExists ? savedFamilyId : appData.families[0].id;
       }
     }
 
@@ -1288,11 +1332,19 @@ async function refreshInviteCode() {
   }
 
   const family = currentFamily();
-  const newCode = genCode(); // 生成新的6位邀请码
+  if (!family) {
+    showToast('请先选择家庭组');
+    return;
+  }
+
+  // 权限检查：只有 owner 能刷新邀请码
+  const isOwner = await checkFamilyOwnership(family.id);
+  if (!isOwner) { showToast('只有家庭组创建者才能刷新邀请码'); return; }
+
+  const newCode = genCode();
 
   // 检查家庭ID是否为UUID格式（云同步的家庭）
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!family.id || !uuidRegex.test(family.id)) {
+  if (!family.id || !UUID_REGEX.test(family.id)) {
     showToast('本地家庭组请先同步到云端');
     return;
   }
@@ -1306,9 +1358,8 @@ async function refreshInviteCode() {
 
     if (error) throw error;
 
-    // 更新本地数据
+    // 更新本地缓存（无需调用 saveData，已通过 Supabase 持久化）
     family.inviteCode = newCode;
-    saveData(appData);
 
     document.getElementById('inviteCodeDisplay').value = newCode;
     showToast('邀请码已刷新');
@@ -1347,9 +1398,15 @@ const CATEGORIES = [
 const STORAGE_KEY = 'homeStorageApp';
 
 // ---------- 工具函数 ----------
-function escHtml(str) { return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escHtml(str) { return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function genId() { return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
-function genCode() { return Math.random().toString(36).slice(2,8).toUpperCase(); }
+function genCode() {
+  // 排除易混淆字符 0/O/1/I
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
 function catInfo(key) { return CATEGORIES.find(c=>c.key===key) || CATEGORIES[CATEGORIES.length-1]; }
 
 // ---------- 保质期工具函数 ----------
@@ -1412,26 +1469,69 @@ function catInfo(key) {
   return getAllCategories().find(c => c.key === key) || { key: 'other', icon: '🏷️', label: '其他' };
 }
 
-function addCustomCategory(icon, label) {
+async function addCustomCategory(icon, label) {
   if (!appData.customCategories) appData.customCategories = [];
+  if (!appData.currentFamilyId || !currentUser) {
+    showToast('请先登录并选择家庭组');
+    return null;
+  }
   const key = 'custom_' + genId();
-  appData.customCategories.push({ key, icon, label });
-  saveData(appData);
-  return key;
-}
+  const newCat = { key, icon, label };
 
-function editCustomCategory(key, icon, label) {
-  const cat = appData.customCategories.find(c => c.key === key);
-  if (cat) {
-    cat.icon = icon;
-    cat.label = label;
-    saveData(appData);
+  try {
+    const { error } = await withRetry(() =>
+      supabaseClient.from(SUPABASE_CONFIG.tables.customCategories).insert({
+        key,
+        icon,
+        label,
+        family_id: appData.currentFamilyId,
+        user_id: currentUser.id,
+        created_at: new Date().toISOString()
+      })
+    );
+    if (error) throw error;
+    appData.customCategories.push(newCat);
+    return key;
+  } catch (e) {
+    console.error('[Category] 添加失败:', e);
+    showToast('分类保存失败：' + (e.message || '网络错误'));
+    return null;
   }
 }
 
-function deleteCustomCategory(key) {
-  appData.customCategories = appData.customCategories.filter(c => c.key !== key);
-  saveData(appData);
+async function editCustomCategory(key, icon, label) {
+  const cat = appData.customCategories.find(c => c.key === key);
+  if (!cat) return;
+  try {
+    const { error } = await withRetry(() =>
+      supabaseClient.from(SUPABASE_CONFIG.tables.customCategories)
+        .update({ icon, label })
+        .eq('key', key)
+        .eq('user_id', currentUser.id)
+    );
+    if (error) throw error;
+    cat.icon = icon;
+    cat.label = label;
+  } catch (e) {
+    console.error('[Category] 编辑失败:', e);
+    showToast('分类更新失败：' + (e.message || '网络错误'));
+  }
+}
+
+async function deleteCustomCategory(key) {
+  try {
+    const { error } = await withRetry(() =>
+      supabaseClient.from(SUPABASE_CONFIG.tables.customCategories)
+        .delete()
+        .eq('key', key)
+        .eq('user_id', currentUser.id)
+    );
+    if (error) throw error;
+    appData.customCategories = appData.customCategories.filter(c => c.key !== key);
+  } catch (e) {
+    console.error('[Category] 删除失败:', e);
+    showToast('分类删除失败：' + (e.message || '网络错误'));
+  }
 }
 
 let toastTimer;
@@ -1440,6 +1540,59 @@ function showToast(msg) {
   el.textContent=msg; el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer=setTimeout(()=>el.classList.remove('show'),2200);
+}
+
+// ---------- 自定义弹窗（替代 prompt/confirm） ----------
+function showConfirmDialog(title, message, confirmText = '确定') {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay show';
+    overlay.style.zIndex = '600';
+    overlay.innerHTML = `
+      <div class="drawer show" style="max-height:60vh;">
+        <div class="drawer-handle"></div>
+        <div class="drawer-title">${escHtml(title)}</div>
+        <div style="font-size:14px;color:var(--text2);line-height:1.6;margin-bottom:20px;">${escHtml(message)}</div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn" style="flex:1" data-action="cancel">取消</button>
+          <button class="btn btn-danger" style="flex:1" data-action="confirm">${escHtml(confirmText)}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const cleanup = (val) => { overlay.remove(); resolve(val); };
+    overlay.querySelector('[data-action="cancel"]').onclick = () => cleanup(false);
+    overlay.querySelector('[data-action="confirm"]').onclick = () => cleanup(true);
+    overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(false); });
+  });
+}
+
+function showPromptDialog(title, placeholder, defaultValue = '') {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay show';
+    overlay.style.zIndex = '600';
+    overlay.innerHTML = `
+      <div class="drawer show" style="max-height:60vh;">
+        <div class="drawer-handle"></div>
+        <div class="drawer-title">${escHtml(title)}</div>
+        <input type="text" id="promptInput" placeholder="${escAttr(placeholder)}" value="${escAttr(defaultValue)}" maxlength="20" style="margin-bottom:16px;">
+        <div style="display:flex;gap:10px;">
+          <button class="btn" style="flex:1" data-action="cancel">取消</button>
+          <button class="btn btn-primary" style="flex:1" data-action="confirm">确定</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#promptInput');
+    input.focus();
+    input.select();
+    const cleanup = (val) => { overlay.remove(); resolve(val); };
+    overlay.querySelector('[data-action="cancel"]').onclick = () => cleanup(null);
+    overlay.querySelector('[data-action="confirm"]').onclick = () => cleanup(input.value.trim());
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') cleanup(input.value.trim()); if (e.key === 'Escape') cleanup(null); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(null); });
+  });
 }
 
 // ---------- 数据管理 ----------
@@ -1451,10 +1604,59 @@ function loadData() {
   return { families: [], items: [], currentFamilyId: null, customCategories: [] };
 }
 
+// saveData 已废弃 - 所有写操作必须调用对应的 Supabase API 函数
+// 保留空函数仅为兼容历史调用，会输出警告帮助定位遗漏的迁移点
 function saveData(data) {
-  // 纯在线模式：不再保存到localStorage
-  // 数据已通过Supabase API保存到云端
-  console.log('[Storage] 数据已通过Supabase保存到云端');
+  console.warn('[Deprecated] saveData 是空操作，请改用对应的 Supabase API。调用栈：', new Error().stack);
+}
+
+// ---------- 常量 ----------
+const MAX_ZOOM = 30;
+const MIN_ZOOM = 0.5;
+const ZOOM_STEP = 0.2;
+const WHEEL_ZOOM_STEP = 0.1;
+const IMAGE_MAX_SIZE = 600;
+const IMAGE_QUALITY = 0.7;
+const SEARCH_DEBOUNCE_MS = 200;
+const NETWORK_TIMEOUT_MS = 10000;
+const DRAG_THRESHOLD = 3;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// ---------- 通用工具 ----------
+// 带超时的 fetch 包装（用于 Supabase 调用），完成后清理 timer 避免泄漏
+function withTimeout(promise, ms = NETWORK_TIMEOUT_MS) {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('请求超时')), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+}
+
+// 转义 HTML（含单引号，防止 onclick 注入）
+function escAttr(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// 防抖
+function debounce(fn, ms) {
+  let timer = null;
+  return function (...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+// 网络请求重试（最多重试 1 次）
+async function withRetry(fn, retries = 1) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (retries <= 0 || (e.message && e.message.includes('权限'))) throw e;
+    console.warn('[Retry] 操作失败，重试中...', e.message);
+    await new Promise(r => setTimeout(r, 500));
+    return fn();
+  }
 }
 
 let appData = loadData();
@@ -1510,68 +1712,131 @@ function updateFamilyBadge() {
 }
 
 // ---------- 户型图管理 ----------
+// 将本地 floorImgs 数组同步到云端 families.floor_imgs
+async function syncFloorImgsToCloud(familyId) {
+  if (!supabaseClient || !familyId || !UUID_REGEX.test(familyId)) return;
+  const f = appData.families.find(x => x.id === familyId);
+  if (!f) return;
+  try {
+    const { error } = await withRetry(() =>
+      supabaseClient.from(SUPABASE_CONFIG.tables.families)
+        .update({
+          floor_imgs: f.floorImgs,
+          current_floor_img_id: f.currentFloorImgId
+        })
+        .eq('id', familyId)
+    );
+    if (error) console.error('[Floor] 同步到云端失败:', error);
+  } catch (e) {
+    console.error('[Floor] 同步异常:', e);
+  }
+}
+
 function currentFloorImg() {
   const f = currentFamily();
   if (!f || !f.floorImgs || f.floorImgs.length === 0) return null;
   return f.floorImgs.find(img => img.id === f.currentFloorImgId) || f.floorImgs[0];
 }
 
-function switchFloorImg(floorId) {
+async function switchFloorImg(floorId) {
   const f = currentFamily();
   if (!f) return;
   f.currentFloorImgId = floorId;
-  saveData(appData);
+  await syncFloorImgsToCloud(f.id);
+  resetZoom();
   renderFloorPlan();
   renderFloorTabs();
 }
 
-function addFloorImg(name, imgData) {
+async function addFloorImg(name, imgData) {
   const f = currentFamily();
   if (!f) return;
   if (!f.floorImgs) f.floorImgs = [];
-  const newFloor = { id: genId(), name, img: imgData };
+  // 图片可能很大，前端压缩
+  const compressed = await compressFloorImage(imgData);
+  const newFloor = { id: genId(), name, img: compressed };
   f.floorImgs.push(newFloor);
   f.currentFloorImgId = newFloor.id;
-  saveData(appData);
+  await syncFloorImgsToCloud(f.id);
   renderFloorPlan();
   renderFloorTabs();
 }
 
-function renameFloorImg(floorId) {
+// 压缩户型图（保持较高清晰度，最大宽度 1600px）
+function compressFloorImage(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1600;
+      let w = img.width, h = img.height;
+      if (w > MAX) { h = h * MAX / w; w = MAX; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+async function renameFloorImg(floorId) {
   const f = currentFamily();
   if (!f) return;
   const floor = f.floorImgs.find(img => img.id === floorId);
   if (!floor) return;
-  const newName = prompt('重命名楼层', floor.name);
-  if (newName && newName !== floor.name) {
-    floor.name = newName;
-    saveData(appData);
-    renderFloorTabs();
-  }
+  const newName = await showPromptDialog('重命名楼层', '请输入新名称', floor.name);
+  if (!newName || newName === floor.name) return;
+  floor.name = newName;
+  await syncFloorImgsToCloud(f.id);
+  renderFloorTabs();
 }
 
-function deleteFloorImg(floorId) {
+async function deleteFloorImg(floorId) {
   const f = currentFamily();
   if (!f || f.floorImgs.length <= 1) {
     showToast('至少保留一张户型图');
     return;
   }
-  if (!confirm('确定删除该户型图吗？')) return;
+  const ok = await showConfirmDialog('删除户型图', '删除户型图后，相关物品的位置标记也会被清除。确定删除吗？', '删除');
+  if (!ok) return;
 
-  // 删除关联的物品标记
-  appData.items.forEach(item => {
-    if (item.floorImgId === floorId) {
-      item.floorImgId = '';
-      item.xPct = null;
-      item.yPct = null;
+  // 先更新云端所有受影响物品的位置，全部成功后再改本地
+  const affectedItems = appData.items.filter(i => i.familyId === f.id && i.floorImgId === floorId);
+  if (affectedItems.length > 0) {
+    try {
+      const updates = affectedItems.map(i =>
+        supabaseClient.from(SUPABASE_CONFIG.tables.items)
+          .update({ x_pct: null, y_pct: null, floor_img_id: '' })
+          .eq('id', i.id)
+      );
+      const results = await Promise.all(updates);
+      const errs = results.filter(r => r.error);
+      if (errs.length > 0) {
+        throw new Error(`${errs.length} 个物品位置清除失败：${errs[0].error.message}`);
+      }
+      // 全部成功，更新本地
+      affectedItems.forEach(i => { i.xPct = null; i.yPct = null; i.floorImgId = ''; });
+    } catch (e) {
+      console.error('[Floor] 清除物品位置失败:', e);
+      showToast('清除物品位置失败，已取消删除');
+      return;
     }
-  });
+  }
 
+  // 本地修改 floorImgs
   f.floorImgs = f.floorImgs.filter(img => img.id !== floorId);
   if (f.currentFloorImgId === floorId) {
     f.currentFloorImgId = f.floorImgs[0]?.id || '';
   }
-  saveData(appData);
+  // 同步到云端
+  try {
+    await syncFloorImgsToCloud(f.id);
+  } catch (e) {
+    console.error('[Floor] 同步户型图失败:', e);
+    showToast('户型图已删除本地，但同步到云端失败，下次登录会恢复');
+    await loadAllDataFromCloud();
+  }
   renderFloorPlan();
   renderFloorTabs();
   renderItemList();
@@ -1599,86 +1864,144 @@ function renderFloorTabs() {
 }
 
 async function addFamily() {
-  const name = prompt_inline('新建家庭组名称', '新家庭');
+  const name = await showPromptDialog('新建家庭组', '请输入家庭组名称', '新家庭');
   if (!name) return;
+  if (name.length > 20) { showToast('名称不能超过20字'); return; }
 
   if (supabaseClient && currentUser) {
-    // 云端模式：创建到Supabase
-    const result = await createCloudFamily(name);
-    if (result) {
+    try {
+      const result = await createCloudFamily(name);
+      if (!result) { showToast('创建失败'); return; }
       appData.families.push({
         id: result.id,
         name: result.name,
+        ownerId: result.owner_id,
         inviteCode: result.invite_code,
         floorImgs: result.floor_imgs || [],
         currentFloorImgId: result.current_floor_img_id || '',
         createdAt: new Date(result.created_at).getTime()
       });
       appData.currentFamilyId = result.id;
-    } else {
-      showToast('创建失败');
-      return;
+      updateFamilyBadge();
+      renderFloorPlan();
+      renderItemList();
+      renderMinePage();
+      showToast('已创建家庭组: ' + name);
+    } catch (e) {
+      console.error('[Family] 创建失败:', e);
+      showToast('创建失败：' + (e.message || '网络错误'));
     }
   } else {
-    // 本地模式
-    const f = { id: genId(), name, floorImgs: [], currentFloorImgId: '', createdAt: Date.now() };
-    appData.families.push(f);
-    appData.currentFamilyId = f.id;
+    showToast('请先登录');
   }
-
-  updateFamilyBadge();
-  renderFloorPlan();
-  renderItemList();
-  renderMinePage();
-  showToast('已创建家庭组: ' + name);
 }
 
-function switchFamily(id) {
+async function switchFamily(id) {
+  if (appData.currentFamilyId === id) return;
   appData.currentFamilyId = id;
-  saveData(appData);
+  // 当前家庭选择保存在 localStorage（用户偏好，非业务数据）
+  try { localStorage.setItem('lastFamilyId', id); } catch (e) {}
   updateFamilyBadge();
   pendingPos = null;
+  // 重置缩放状态
+  resetZoom();
   renderFloorPlan();
   renderItemList();
   renderMinePage();
   closeFamilyModal();
-  showToast('已切换到: ' + currentFamily().name);
+  showToast('已切换到: ' + (currentFamily()?.name || ''));
 }
 
-function renameFamily(id) {
-  const f = appData.families.find(x=>x.id===id);
+async function renameFamily(id) {
+  const f = appData.families.find(x => x.id === id);
   if (!f) return;
-  const newName = prompt_inline('修改名称', f.name);
+  // 权限检查：只有 owner 能重命名
+  const isOwner = await checkFamilyOwnership(id);
+  if (!isOwner) { showToast('只有家庭组创建者才能重命名'); return; }
+
+  const newName = await showPromptDialog('修改家庭组名称', '请输入新名称', f.name);
   if (!newName || newName === f.name) return;
-  f.name = newName;
-  saveData(appData);
-  updateFamilyBadge();
-  renderMinePage();
-  showToast('已重命名');
+  if (newName.length > 20) { showToast('名称不能超过20字'); return; }
+
+  try {
+    const { error } = await withRetry(() =>
+      supabaseClient.from(SUPABASE_CONFIG.tables.families).update({ name: newName }).eq('id', id)
+    );
+    if (error) throw error;
+    f.name = newName;
+    updateFamilyBadge();
+    renderMinePage();
+    showToast('已重命名');
+  } catch (e) {
+    console.error('[Family] 重命名失败:', e);
+    showToast('重命名失败：' + (e.message || '网络错误'));
+  }
 }
 
-function deleteFamily(id) {
-  const f = appData.families.find(x=>x.id===id);
+async function deleteFamily(id) {
+  const f = appData.families.find(x => x.id === id);
   if (!f) return;
   if (appData.families.length <= 1) { showToast('至少保留一个家庭组'); return; }
-  appData.items = appData.items.filter(i=>i.familyId!==id);
-  appData.families = appData.families.filter(x=>x.id!==id);
-  if (appData.currentFamilyId === id) {
-    appData.currentFamilyId = appData.families[0].id;
+
+  // 检查权限：只有 owner 能删除
+  const isOwner = await checkFamilyOwnership(id);
+  if (!isOwner) { showToast('只有家庭组创建者才能删除'); return; }
+
+  const ok = await showConfirmDialog('删除家庭组', `确定删除「${f.name}」及其下所有物品吗？此操作不可恢复。`, '删除');
+  if (!ok) return;
+
+  try {
+    // 按顺序删除：items → members → family，任一失败则中止并保留本地状态
+    const { error: itemsErr } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.items).delete().eq('family_id', id);
+    if (itemsErr) throw new Error('删除物品失败：' + itemsErr.message);
+
+    const { error: membersErr } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.familyMembers).delete().eq('family_id', id);
+    if (membersErr) throw new Error('删除成员失败：' + membersErr.message);
+
+    const { error: familyErr } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.families).delete().eq('id', id);
+    if (familyErr) throw new Error('删除家庭组失败：' + familyErr.message);
+
+    // 全部成功后再同步本地状态
+    appData.items = appData.items.filter(i => i.familyId !== id);
+    appData.families = appData.families.filter(x => x.id !== id);
+    if (appData.currentFamilyId === id) {
+      appData.currentFamilyId = appData.families[0].id;
+    }
+    updateFamilyBadge();
+    renderFloorPlan();
+    renderItemList();
+    renderMinePage();
+    closeFamilyModal();
+    showToast('已删除家庭组: ' + f.name);
+  } catch (e) {
+    console.error('[Family] 删除失败:', e);
+    showToast('删除失败：' + (e.message || '网络错误'));
+    // 删除失败时从云端重新加载数据，确保本地与云端一致
+    await loadAllDataFromCloud();
+    renderFloorPlan();
+    renderItemList();
+    renderMinePage();
   }
-  saveData(appData);
-  updateFamilyBadge();
-  renderFloorPlan();
-  renderItemList();
-  renderMinePage();
-  closeFamilyModal();
-  showToast('已删除家庭组: ' + f.name);
 }
 
-// 简易内联输入（代替 prompt/confirm）
-function prompt_inline(title, defaultVal) {
-  const val = window.prompt(title, defaultVal);
-  return val;
+// 检查当前用户是否为家庭组的 owner（异步查询云端）
+async function checkFamilyOwnership(familyId) {
+  if (!supabaseClient || !currentUser) return false;
+  try {
+    const { data, error } = await supabaseClient
+      .from(SUPABASE_CONFIG.tables.families)
+      .select('owner_id')
+      .eq('id', familyId)
+      .single();
+    if (error) return false;
+    return data.owner_id === currentUser.id;
+  } catch (e) {
+    console.error('[Family] 检查权限失败:', e);
+    return false;
+  }
 }
 
 // ---------- 户型图 ----------
@@ -1688,22 +2011,24 @@ function triggerFloorUpload() {
   document.getElementById('floorInput').click();
 }
 
-function loadFloorPlan(event) {
+async function loadFloorPlan(event) {
   const file = event.target.files[0];
   if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { showToast('图片不能超过10MB'); event.target.value = ''; return; }
+
   const reader = new FileReader();
-  reader.onload = (e) => {
+  reader.onload = async (e) => {
     const floorImg = currentFloorImg();
     const f = currentFamily();
     if (floorImg) {
       // 更新当前户型图
-      floorImg.img = e.target.result;
-      saveData(appData);
+      floorImg.img = await compressFloorImage(e.target.result);
+      await syncFloorImgsToCloud(f.id);
       renderFloorPlan();
       showToast('户型图已更新');
     } else if (f) {
       // 第一次上传，创建默认楼层
-      addFloorImg('默认楼层', e.target.result);
+      await addFloorImg('默认楼层', e.target.result);
       showToast('户型图已添加');
     }
   };
@@ -1800,6 +2125,7 @@ function renderFloorPlan() {
   items.forEach(item => {
     const m = document.createElement('div');
     m.className = 'marker';
+    m.setAttribute('data-item-id', item.id);
     m.style.left = item.xPct + '%';
     m.style.top = item.yPct + '%';
     const markerColor = getMarkerColor(item.expiryDate);
@@ -1824,9 +2150,9 @@ function renderFloorPlan() {
   const zoomDiv = document.createElement('div');
   zoomDiv.className = 'floor-zoom-controls';
   zoomDiv.innerHTML = `
-    <div class="floor-zoom-btn" onclick="event.stopPropagation();zoomFromCenter(0.2)">＋</div>
-    <div class="floor-zoom-btn" onclick="event.stopPropagation();zoomFromCenter(-0.2)">－</div>
-    <div class="floor-zoom-btn" onclick="event.stopPropagation();resetZoom()">⟲</div>
+    <div class="floor-zoom-btn" onclick="event.stopPropagation();zoomFromCenter(${ZOOM_STEP})" title="放大">＋</div>
+    <div class="floor-zoom-btn" onclick="event.stopPropagation();zoomFromCenter(${-ZOOM_STEP})" title="缩小">－</div>
+    <div class="floor-zoom-btn" onclick="event.stopPropagation();resetZoom()" title="重置">⟲</div>
   `;
   wrap.appendChild(zoomDiv);
 
@@ -1852,7 +2178,7 @@ let hasDragged = false;
 
 function zoomFloor(delta, centerX, centerY) {
   const oldScale = floorScale;
-  const newScale = Math.max(0.5, Math.min(30, floorScale + delta));
+  const newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, floorScale + delta));
 
   if (centerX !== undefined && centerY !== undefined) {
     // 以鼠标位置为中心缩放
@@ -1901,7 +2227,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const rect = floorWrap.getBoundingClientRect();
       const centerX = e.clientX - rect.left;
       const centerY = e.clientY - rect.top;
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      const delta = e.deltaY > 0 ? -WHEEL_ZOOM_STEP : WHEEL_ZOOM_STEP;
       zoomFloor(delta, centerX, centerY);
     }, { passive: false });
 
@@ -1927,7 +2253,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const rect = floorWrap.getBoundingClientRect();
         const dist = getDistance(e.touches[0], e.touches[1]);
         const ratio = dist / initialDistance;
-        const newScale = Math.max(0.5, Math.min(30, initialScale * ratio));
+        const newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, initialScale * ratio));
 
         // 计算双指中心点
         const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
@@ -1962,7 +2288,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!isDragging) return;
       const dx = e.clientX - dragStartX;
       const dy = e.clientY - dragStartY;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDragged = true;
+      if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) hasDragged = true;
       floorTranslateX = dragStartTranslateX + dx;
       floorTranslateY = dragStartTranslateY + dy;
       applyFloorTransform();
@@ -1994,7 +2320,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.touches.length === 1) {
         const dx = e.touches[0].clientX - touchDragStartX;
         const dy = e.touches[0].clientY - touchDragStartY;
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDragged = true;
+        if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) hasDragged = true;
         floorTranslateX = touchDragStartTX + dx;
         floorTranslateY = touchDragStartTY + dy;
         applyFloorTransform();
@@ -2037,23 +2363,68 @@ function cancelAdd() {
   renderFloorPlan();
 }
 
-function confirmAdd() {
+async function confirmAdd() {
+  if (isSaving) return;
   const item = readItemForm('quickAddForm');
   if (!item) return;
-  item.xPct = pendingPos.x;
-  item.yPct = pendingPos.y;
-  item.familyId = appData.currentFamilyId;
-  item.floorImgId = currentFloorImg()?.id || '';
-  item.id = genId();
-  item.createdAt = Date.now();
-  appData.items.push(item);
-  saveData(appData);
-  pendingPos = null;
-  document.getElementById('addModeHint').style.display = 'none';
-  document.getElementById('quickAddCard').style.display = 'none';
-  renderFloorPlan();
-  renderItemList();
-  showToast('物品已添加');
+  if (!appData.currentFamilyId) { showToast('请先选择家庭组'); return; }
+  if (!currentUser) { showToast('请先登录'); return; }
+
+  isSaving = true;
+  const saveBtn = document.querySelector('#quickAddCard .btn-primary');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中...'; }
+
+  try {
+    // 写入云端
+    const newItem = {
+      family_id: appData.currentFamilyId,
+      name: item.name,
+      cat: item.cat,
+      loc: item.loc,
+      desc: item.desc,
+      photo: item.photo || null,
+      x_pct: pendingPos.x,
+      y_pct: pendingPos.y,
+      floor_img_id: currentFloorImg()?.id || '',
+      expiry_date: item.expiryDate || null,
+      created_by: currentUser.id,
+      created_at: new Date().toISOString()
+    };
+
+    const { data, error } = await withRetry(() =>
+      supabaseClient.from(SUPABASE_CONFIG.tables.items).insert(newItem).select().single()
+    );
+    if (error) throw error;
+
+    // 同步到本地缓存
+    appData.items.push({
+      id: data.id,
+      familyId: data.family_id,
+      name: data.name,
+      cat: data.cat,
+      loc: data.loc,
+      desc: data.desc,
+      photo: data.photo,
+      xPct: data.x_pct,
+      yPct: data.y_pct,
+      floorImgId: data.floor_img_id,
+      expiryDate: data.expiry_date,
+      createdAt: new Date(data.created_at).getTime()
+    });
+
+    pendingPos = null;
+    document.getElementById('addModeHint').style.display = 'none';
+    document.getElementById('quickAddCard').style.display = 'none';
+    renderFloorPlan();
+    renderItemList();
+    showToast('物品已添加');
+  } catch (e) {
+    console.error('[Item] 户型图添加失败:', e);
+    showToast('保存失败：' + (e.message || '网络错误'));
+  } finally {
+    isSaving = false;
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存'; }
+  }
 }
 
 // ---------- 物品表单 ----------
@@ -2101,23 +2472,24 @@ function selectCat(el) {
 function handlePhotoUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { showToast('图片不能超过10MB'); event.target.value = ''; return; }
+
   const reader = new FileReader();
   reader.onload = (e) => {
     // 压缩图片
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      const MAX = 600;
       let w = img.width, h = img.height;
-      if (w > MAX || h > MAX) {
-        if (w > h) { h = h * MAX / w; w = MAX; }
-        else { w = w * MAX / h; h = MAX; }
+      if (w > IMAGE_MAX_SIZE || h > IMAGE_MAX_SIZE) {
+        if (w > h) { h = h * IMAGE_MAX_SIZE / w; w = IMAGE_MAX_SIZE; }
+        else { w = w * IMAGE_MAX_SIZE / h; h = IMAGE_MAX_SIZE; }
       }
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      const dataUrl = canvas.toDataURL('image/jpeg', IMAGE_QUALITY);
       const preview = document.getElementById('photoPreview');
-      preview.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">`;
+      preview.innerHTML = `<img src="${escAttr(dataUrl)}" alt="预览" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">`;
       preview.style.display = 'block';
       document.getElementById('photoPlaceholder').style.display = 'none';
     };
@@ -2142,8 +2514,10 @@ function readItemForm(formId) {
 // ---------- 物品增删改查 ----------
 let editingId = null;
 let viewingItemId = null;
+let isSaving = false; // 全局保存锁，防止并发提交
 
 function openAddDrawer() {
+  if (isSaving) return;
   editingId = null;
   document.getElementById('drawerTitle').textContent = '添加物品';
   document.getElementById('drawerForm').innerHTML = buildItemForm();
@@ -2152,6 +2526,7 @@ function openAddDrawer() {
 }
 
 function openEditDrawer(id) {
+  if (isSaving) return;
   const item = appData.items.find(i=>i.id===id);
   if (!item) return;
   editingId = id;
@@ -2168,79 +2543,97 @@ function closeDrawer() {
 }
 
 async function saveItem() {
+  if (isSaving) return;
   const formData = readItemForm('drawerForm');
   if (!formData) return;
+  if (!currentUser) { showToast('请先登录'); return; }
 
+  isSaving = true;
   const btn = document.getElementById('drawerSaveBtn');
   btn.disabled = true;
   btn.textContent = '保存中...';
+  const wasEditing = !!editingId;
 
   try {
-    if (editingId) {
-      // 编辑模式：更新到Supabase
-      const { error } = await supabaseClient
-        .from(SUPABASE_CONFIG.tables.items)
-        .update({
-          name: formData.name,
-          cat: formData.cat,
-          loc: formData.loc,
-          desc: formData.desc,
-          photo: formData.photo,
-          expiry_date: formData.expiryDate || null
-        })
-        .eq('id', editingId);
-
-      if (error) throw error;
-
-      // 更新本地缓存
-      const item = appData.items.find(i=>i.id===editingId);
-      if (item) {
-        Object.assign(item, formData);
-        item.updatedAt = Date.now();
-      }
-    } else {
-      // 新增模式：插入到Supabase
-      const newItem = {
-        id: genId(),
-        family_id: appData.currentFamilyId,
+    if (wasEditing) {
+      // 编辑模式：保留原有的位置字段，只更新表单字段
+      const existing = appData.items.find(i => i.id === editingId);
+      const updateData = {
         name: formData.name,
         cat: formData.cat,
         loc: formData.loc,
         desc: formData.desc,
         photo: formData.photo,
         expiry_date: formData.expiryDate || null,
+        x_pct: existing?.xPct ?? null,
+        y_pct: existing?.yPct ?? null,
+        floor_img_id: existing?.floorImgId || ''
+      };
+
+      const { error } = await withRetry(() =>
+        supabaseClient.from(SUPABASE_CONFIG.tables.items).update(updateData).eq('id', editingId)
+      );
+      if (error) throw error;
+
+      // 同步本地缓存
+      if (existing) {
+        Object.assign(existing, {
+          name: formData.name,
+          cat: formData.cat,
+          loc: formData.loc,
+          desc: formData.desc,
+          photo: formData.photo,
+          expiryDate: formData.expiryDate || null
+        });
+        existing.updatedAt = Date.now();
+      }
+    } else {
+      // 新增模式：让 Supabase 生成 id
+      const newItem = {
+        family_id: appData.currentFamilyId,
+        name: formData.name,
+        cat: formData.cat,
+        loc: formData.loc,
+        desc: formData.desc,
+        photo: formData.photo,
+        x_pct: null,
+        y_pct: null,
+        floor_img_id: '',
+        expiry_date: formData.expiryDate || null,
         created_by: currentUser.id,
         created_at: new Date().toISOString()
       };
 
-      const { error } = await supabaseClient
-        .from(SUPABASE_CONFIG.tables.items)
-        .insert(newItem);
-
+      const { data, error } = await withRetry(() =>
+        supabaseClient.from(SUPABASE_CONFIG.tables.items).insert(newItem).select().single()
+      );
       if (error) throw error;
 
-      // 添加到本地缓存
       appData.items.push({
-        id: newItem.id,
-        familyId: newItem.family_id,
-        name: newItem.name,
-        cat: newItem.cat,
-        loc: newItem.loc,
-        desc: newItem.desc,
-        photo: newItem.photo,
-        expiryDate: newItem.expiry_date,
-        createdAt: new Date(newItem.created_at).getTime()
+        id: data.id,
+        familyId: data.family_id,
+        name: data.name,
+        cat: data.cat,
+        loc: data.loc,
+        desc: data.desc,
+        photo: data.photo,
+        xPct: data.x_pct,
+        yPct: data.y_pct,
+        floorImgId: data.floor_img_id,
+        expiryDate: data.expiry_date,
+        createdAt: new Date(data.created_at).getTime()
       });
     }
 
     closeDrawer();
     renderItemList();
     renderFloorPlan();
-    showToast(editingId ? '物品已更新' : '物品已添加');
+    showToast(wasEditing ? '物品已更新' : '物品已添加');
   } catch (e) {
     console.error('[Item] 保存失败:', e);
     showToast('保存失败：' + (e.message || '网络错误'));
   } finally {
+    isSaving = false;
     btn.disabled = false;
     btn.textContent = '保存';
   }
@@ -2302,23 +2695,18 @@ function showItemDetail(id) {
 }
 
 function highlightMarker(itemId) {
-  // 切换到户型图页后，高亮对应标记
+  // 切换到户型图页后，高亮对应标记（通过 data-item-id 精确匹配）
   setTimeout(() => {
-    const markers = document.querySelectorAll('.marker');
+    const markers = document.querySelectorAll('.marker[data-item-id]');
     markers.forEach(m => m.classList.remove('active'));
-    // 找到对应标记并高亮
-    const item = appData.items.find(i=>i.id===itemId);
-    if (!item || item.xPct==null) return;
-    // 通过位置匹配找到标记元素
-    markers.forEach(m => {
-      const left = parseFloat(m.style.left);
-      const top = parseFloat(m.style.top);
-      if (Math.abs(left - item.xPct) < 0.1 && Math.abs(top - item.yPct) < 0.1) {
-        m.classList.add('active');
-        // 3秒后取消高亮
-        setTimeout(() => m.classList.remove('active'), 3000);
-      }
-    });
+    const target = document.querySelector(`.marker[data-item-id="${CSS.escape(itemId)}"]`);
+    if (target) {
+      target.classList.add('active');
+      // 滚动到标记位置
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 3秒后取消高亮
+      setTimeout(() => target.classList.remove('active'), 3000);
+    }
   }, 350);
 }
 
@@ -2328,14 +2716,32 @@ function closeDetail() {
   viewingItemId = null;
 }
 
-function deleteCurrentItem() {
+async function deleteCurrentItem() {
+  if (isSaving) return;
   if (!viewingItemId) return;
-  appData.items = appData.items.filter(i=>i.id!==viewingItemId);
-  saveData(appData);
-  closeDetail();
-  renderItemList();
-  renderFloorPlan();
-  showToast('物品已删除');
+
+  // 用自定义确认弹窗代替 confirm
+  const ok = await showConfirmDialog('删除物品', '确定删除该物品吗？此操作不可恢复。', '删除');
+  if (!ok) return;
+
+  isSaving = true;
+  try {
+    const { error } = await withRetry(() =>
+      supabaseClient.from(SUPABASE_CONFIG.tables.items).delete().eq('id', viewingItemId)
+    );
+    if (error) throw error;
+
+    appData.items = appData.items.filter(i => i.id !== viewingItemId);
+    closeDetail();
+    renderItemList();
+    renderFloorPlan();
+    showToast('物品已删除');
+  } catch (e) {
+    console.error('[Item] 删除失败:', e);
+    showToast('删除失败：' + (e.message || '网络错误'));
+  } finally {
+    isSaving = false;
+  }
 }
 
 function editCurrentItem() {
@@ -2385,24 +2791,7 @@ function renderItemList() {
     return;
   }
 
-  list.innerHTML = items.map(item => {
-    const cat = catInfo(item.cat);
-    const expiryTag = item.expiryDate ? `<span class="tag ${getExpiryTagClass(item.expiryDate)}" style="margin-left:4px;font-size:11px;">${getExpiryStatusLabel(item.expiryDate)}</span>` : '';
-    return `<div class="item-card" onclick="showItemDetail('${item.id}')">
-      <div class="item-thumb">
-        ${item.photo ? `<img src="${item.photo}">` : cat.icon}
-      </div>
-      <div class="item-info">
-        <div class="item-name">${escHtml(item.name)}</div>
-        <div class="item-meta">
-          <span class="tag tag-primary" style="margin-right:4px;">${cat.icon} ${cat.label}</span>
-          ${item.loc ? escHtml(item.loc) : ''}
-          ${expiryTag}
-        </div>
-      </div>
-      ${item.xPct!=null ? `<div style="color:${getMarkerColor(item.expiryDate)};font-size:16px;">📍</div>` : ''}
-    </div>`;
-  }).join('');
+  list.innerHTML = items.map(item => renderItemCard(item, '')).join('');
 }
 
 // ---------- 搜索 ----------
@@ -2428,14 +2817,42 @@ function matchExpiryFilter(item, filter) {
   return true;
 }
 
-function doSearch() {
+// 渲染单个物品卡片（搜索结果与列表共用）
+function renderItemCard(item, query) {
+  const cat = catInfo(item.cat);
+  const expiryTag = item.expiryDate
+    ? `<span class="tag ${getExpiryTagClass(item.expiryDate)}" style="margin-left:4px;font-size:11px;">${getExpiryStatusLabel(item.expiryDate)}</span>`
+    : '';
+  const nameHtml = query ? hl(item.name, query) : escHtml(item.name);
+  const locHtml = item.loc ? (query ? hl(item.loc, query) : escHtml(item.loc)) : '';
+  const thumbHtml = item.photo
+    ? `<img src="${escAttr(item.photo)}" alt="${escAttr(item.name)}">`
+    : cat.icon;
+  const locationIcon = item.xPct != null
+    ? `<div style="color:${getMarkerColor(item.expiryDate)};font-size:16px;">📍</div>`
+    : '';
+  return `<div class="item-card" onclick="showItemDetail('${escAttr(item.id)}')">
+    <div class="item-thumb">${thumbHtml}</div>
+    <div class="item-info">
+      <div class="item-name">${nameHtml}</div>
+      <div class="item-meta">
+        <span class="tag tag-primary" style="margin-right:4px;">${cat.icon} ${escHtml(cat.label)}</span>
+        ${locHtml}
+        ${expiryTag}
+      </div>
+    </div>
+    ${locationIcon}
+  </div>`;
+}
+
+// 防抖搜索
+const doSearch = debounce(function() {
   const q = document.getElementById('searchInput').value.trim().toLowerCase();
   const hint = document.getElementById('searchHint');
   const list = document.getElementById('searchList');
 
   let results = currentItems();
 
-  // 关键词搜索
   if (q) {
     results = results.filter(i =>
       i.name.toLowerCase().includes(q) ||
@@ -2443,52 +2860,20 @@ function doSearch() {
       (i.desc && i.desc.toLowerCase().includes(q))
     );
   }
-
-  // 保质期筛选
   results = results.filter(i => matchExpiryFilter(i, currentExpiryFilter));
 
   if (!q && currentExpiryFilter === 'all') {
-    // 显示所有物品
     hint.textContent = `共 ${results.length} 个物品`;
-    list.innerHTML = results.map(item => {
-      const cat = catInfo(item.cat);
-      const expiryTag = item.expiryDate ? `<span class="tag ${getExpiryTagClass(item.expiryDate)}" style="margin-left:4px;">${getExpiryStatusLabel(item.expiryDate)}</span>` : '';
-      return `<div class="item-card" onclick="showItemDetail('${item.id}')">
-        <div class="item-thumb">
-          ${item.photo ? `<img src="${item.photo}">` : cat.icon}
-        </div>
-        <div class="item-info">
-          <div class="item-name">${escHtml(item.name)}</div>
-          <div class="item-meta">
-            <span class="tag tag-primary" style="margin-right:4px;">${cat.icon} ${cat.label}</span>
-            ${item.loc ? escHtml(item.loc) : ''}
-            ${expiryTag}
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-    return;
+  } else {
+    hint.textContent = `找到 ${results.length} 个结果`;
   }
 
-  hint.textContent = `找到 ${results.length} 个结果`;
-  list.innerHTML = results.map(item => {
-    const cat = catInfo(item.cat);
-    const expiryTag = item.expiryDate ? `<span class="tag ${getExpiryTagClass(item.expiryDate)}" style="margin-left:4px;">${getExpiryStatusLabel(item.expiryDate)}</span>` : '';
-    return `<div class="item-card" onclick="showItemDetail('${item.id}')">
-      <div class="item-thumb">
-        ${item.photo ? `<img src="${item.photo}">` : cat.icon}
-      </div>
-      <div class="item-info">
-        <div class="item-name">${q ? hl(item.name, q) : escHtml(item.name)}</div>
-        <div class="item-meta">
-          <span class="tag tag-primary" style="margin-right:4px;">${cat.icon} ${cat.label}</span>
-          ${item.loc ? (q ? hl(item.loc, q) : escHtml(item.loc)) : ''}
-          ${expiryTag}
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-}
+  if (results.length === 0) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon">🔍</div><div>没有匹配的物品</div></div>';
+  } else {
+    list.innerHTML = results.map(item => renderItemCard(item, q)).join('');
+  }
+}, SEARCH_DEBOUNCE_MS);
 
 function hl(rawText, q) {
   if (!q) return escHtml(rawText);
@@ -2548,10 +2933,32 @@ function renderMinePage() {
   const inviteCard = document.getElementById('inviteCard');
   const f = currentFamily();
   if (f) {
-    const inviteCode = f.inviteCode || genCode();
-    if (!f.inviteCode) { f.inviteCode = inviteCode; saveData(appData); }
-    document.getElementById('inviteCodeDisplay').value = inviteCode;
-    inviteCard.style.display = 'block';
+    // 邀请码必须来自云端，本地不生成
+    if (f.inviteCode) {
+      document.getElementById('inviteCodeDisplay').value = f.inviteCode;
+      inviteCard.style.display = 'block';
+    } else {
+      // 云端没有邀请码，尝试刷新获取
+      inviteCard.style.display = 'block';
+      document.getElementById('inviteCodeDisplay').value = '加载中...';
+      const familyIdAtCall = f.id; // 闭包锁定调用时的 family id
+      inviteFamilyMember(familyIdAtCall).then(code => {
+        // 校验仍是当前 family（避免切换后污染）
+        if (appData.currentFamilyId !== familyIdAtCall) return;
+        if (code) {
+          const cur = appData.families.find(x => x.id === familyIdAtCall);
+          if (cur) cur.inviteCode = code;
+          document.getElementById('inviteCodeDisplay').value = code;
+        } else {
+          document.getElementById('inviteCodeDisplay').value = '点击刷新生成';
+        }
+      }).catch(e => {
+        console.warn('[Invite] 加载邀请码失败:', e);
+        if (appData.currentFamilyId === familyIdAtCall) {
+          document.getElementById('inviteCodeDisplay').value = '加载失败';
+        }
+      });
+    }
   } else {
     inviteCard.style.display = 'none';
   }
@@ -2590,7 +2997,7 @@ async function loadFamilyMembers() {
                     <div style="font-size:11px;color:var(--text2);">${m.role === 'owner' ? '管理员' : '成员'} · 加入于 ${new Date(m.joined_at).toLocaleDateString('zh-CN')}</div>
                   </div>
                 </div>
-                ${m.role !== 'owner' && currentUser && isFamilyOwner(family.id) ? `
+                ${m.role !== 'owner' && currentUser && isFamilyOwnerSync(family.id) ? `
                   <button class="btn btn-ghost" style="font-size:11px;padding:4px 8px;color:var(--danger);" onclick="removeFamilyMember('${family.id}', '${m.user_id}')">移除</button>
                 ` : ''}
               </div>
@@ -2614,17 +3021,25 @@ async function loadFamilyMembers() {
   `;
 }
 
-function isFamilyOwner(familyId) {
-  // 检查当前用户是否是家庭所有者
-  // 简单判断：第一个家庭的所有者是创建者
-  if (appData.families.length > 0 && appData.families[0].id === familyId) {
-    return true;
-  }
-  return false;
+// 同步版本：基于本地缓存的 ownerId 判断（用于 UI 显示快速判断）
+// 注意：appData.families 在 loadAllDataFromCloud 后包含 ownerId 字段
+function isFamilyOwnerSync(familyId) {
+  if (!currentUser) return false;
+  const f = appData.families.find(x => x.id === familyId);
+  return !!(f && f.ownerId && f.ownerId === currentUser.id);
 }
 
+// 异步版本（直接复用 checkFamilyOwnership），用于关键权限检查
+// 保留 isFamilyOwner 名称以备未来扩展（如 admin 角色）
+// async function isFamilyOwner(familyId) { return await checkFamilyOwnership(familyId); }
+
 async function removeFamilyMember(familyId, userId) {
-  if (!confirm('确定要移除该成员吗？')) return;
+  // 权限检查
+  const isOwner = await checkFamilyOwnership(familyId);
+  if (!isOwner) { showToast('只有家庭组创建者才能移除成员'); return; }
+
+  const ok = await showConfirmDialog('移除成员', '确定要移除该成员吗？', '移除');
+  if (!ok) return;
 
   try {
     const { error } = await supabaseClient
@@ -2645,7 +3060,33 @@ async function removeFamilyMember(familyId, userId) {
 
 // ---------- 数据导入导出 ----------
 function exportData() {
-  const json = JSON.stringify(appData, null, 2);
+  const exportPayload = {
+    version: '2.0',
+    exportedAt: new Date().toISOString(),
+    families: appData.families.map(f => ({
+      id: f.id,
+      name: f.name,
+      inviteCode: f.inviteCode,
+      floorImgs: f.floorImgs,
+      currentFloorImgId: f.currentFloorImgId,
+      createdAt: f.createdAt
+    })),
+    items: appData.items.map(i => ({
+      familyId: i.familyId,
+      name: i.name,
+      cat: i.cat,
+      loc: i.loc,
+      desc: i.desc,
+      photo: i.photo,
+      xPct: i.xPct,
+      yPct: i.yPct,
+      floorImgId: i.floorImgId,
+      expiryDate: i.expiryDate,
+      createdAt: i.createdAt
+    })),
+    customCategories: appData.customCategories
+  };
+  const json = JSON.stringify(exportPayload, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -2660,42 +3101,129 @@ function triggerImportData() {
   document.getElementById('importInput').click();
 }
 
-function importData(event) {
+async function importData(event) {
   const file = event.target.files[0];
   if (!file) return;
+  if (file.size > 50 * 1024 * 1024) { showToast('文件过大，不能超过50MB'); event.target.value = ''; return; }
+
   const reader = new FileReader();
-  reader.onload = (e) => {
+  reader.onload = async (e) => {
+    let data;
     try {
-      const data = JSON.parse(e.target.result);
-      if (data.families && data.items) {
-        appData = data;
-        saveData(appData);
-        ensureFamily();
-        renderFloorPlan();
-        renderItemList();
-        renderMinePage();
-        showToast('数据导入成功');
-      } else {
-        showToast('文件格式不正确');
-      }
-    } catch(err) {
+      data = JSON.parse(e.target.result);
+    } catch (err) {
       showToast('导入失败：文件解析错误');
+      event.target.value = '';
+      return;
     }
+    if (!data.families || !data.items) {
+      showToast('文件格式不正确');
+      event.target.value = '';
+      return;
+    }
+
+    const ok = await showConfirmDialog(
+      '导入数据',
+      `将导入 ${data.families.length} 个家庭组和 ${data.items.length} 件物品。这会与现有数据合并，确定继续吗？`,
+      '导入'
+    );
+    if (!ok) { event.target.value = ''; return; }
+
+    if (!currentUser || !supabaseClient) {
+      showToast('请先登录后再导入');
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      // 逐个导入家庭组与物品
+      for (const family of data.families) {
+        const { data: newFamily, error: familyErr } = await supabaseClient
+          .from(SUPABASE_CONFIG.tables.families)
+          .insert({
+            name: family.name,
+            owner_id: currentUser.id,
+            floor_imgs: family.floorImgs || [],
+            current_floor_img_id: family.currentFloorImgId || '',
+            invite_code: genCode(),
+            created_at: new Date(family.createdAt || Date.now()).toISOString()
+          })
+          .select()
+          .single();
+        if (familyErr) throw familyErr;
+
+        const familyItems = data.items.filter(i => i.familyId === family.id);
+        if (familyItems.length > 0 && newFamily) {
+          const itemsToInsert = familyItems.map(item => ({
+            family_id: newFamily.id,
+            name: item.name,
+            cat: item.cat || 'other',
+            loc: item.loc || '',
+            desc: item.desc || '',
+            photo: item.photo || null,
+            x_pct: item.xPct || null,
+            y_pct: item.yPct || null,
+            floor_img_id: item.floorImgId || '',
+            expiry_date: item.expiryDate || null,
+            created_by: currentUser.id,
+            created_at: new Date(item.createdAt || Date.now()).toISOString()
+          }));
+          const { error: itemsErr } = await supabaseClient
+            .from(SUPABASE_CONFIG.tables.items)
+            .insert(itemsToInsert);
+          if (itemsErr) throw itemsErr;
+        }
+      }
+
+      showToast('数据导入成功，正在刷新...');
+      await loadAllDataFromCloud();
+      renderFloorPlan();
+      renderItemList();
+      renderMinePage();
+    } catch (err) {
+      console.error('[Import] 导入失败:', err);
+      showToast('导入失败：' + (err.message || '未知错误'));
+    }
+    event.target.value = '';
   };
   reader.readAsText(file);
-  event.target.value = '';
 }
 
-function clearAllData() {
-  if (!window.confirm('确定清空所有数据？此操作不可恢复！')) return;
-  appData = { families: [], items: [], currentFamilyId: null };
-  saveData(appData);
-  ensureFamily();
-  pendingPos = null;
-  renderFloorPlan();
-  renderItemList();
-  renderMinePage();
-  showToast('数据已清空');
+async function clearAllData() {
+  const ok = await showConfirmDialog(
+    '清空所有数据',
+    '⚠️ 此操作将删除你在所有家庭组中的数据，且不可恢复！确定继续吗？',
+    '确认清空'
+  );
+  if (!ok) return;
+
+  // 二次确认
+  const ok2 = await showConfirmDialog('再次确认', '真的要清空所有数据吗？', '我确认');
+  if (!ok2) return;
+
+  try {
+    // 删除所有用户作为 owner 的家庭组（级联删 items/members）
+    const ownedFamilyIds = appData.families.filter(f => f.ownerId === currentUser.id).map(f => f.id);
+    if (ownedFamilyIds.length > 0) {
+      await supabaseClient.from(SUPABASE_CONFIG.tables.items).delete().in('family_id', ownedFamilyIds);
+      await supabaseClient.from(SUPABASE_CONFIG.tables.familyMembers).delete().in('family_id', ownedFamilyIds);
+      await supabaseClient.from(SUPABASE_CONFIG.tables.families).delete().in('id', ownedFamilyIds);
+    }
+    // 删除用户作为 member 的成员关系
+    await supabaseClient.from(SUPABASE_CONFIG.tables.familyMembers).delete().eq('user_id', currentUser.id);
+    // 删除自定义分类
+    await supabaseClient.from(SUPABASE_CONFIG.tables.customCategories).delete().eq('user_id', currentUser.id);
+
+    appData = { families: [], items: [], currentFamilyId: null, customCategories: [] };
+    pendingPos = null;
+    renderFloorPlan();
+    renderItemList();
+    renderMinePage();
+    showToast('数据已清空');
+  } catch (e) {
+    console.error('[Clear] 清空失败:', e);
+    showToast('清空失败：' + (e.message || '网络错误'));
+  }
 }
 
 // ---------- 家庭组弹窗（预留） ----------
@@ -2730,8 +3258,8 @@ function renderCategoryList() {
       <div style="flex:1;font-size:14px;">${escHtml(cat.label)}</div>
       ${isDefault
         ? '<span style="font-size:11px;color:var(--text2);">默认</span>'
-        : `<button class="btn btn-ghost" style="font-size:12px;padding:4px 8px;" onclick="showEditCategoryDialog('${cat.key}','${cat.icon}','${escHtml(cat.label)}')">✏️</button>
-           <button class="btn btn-ghost" style="font-size:12px;padding:4px 8px;color:var(--danger);" onclick="handleDeleteCategory('${cat.key}')">🗑️</button>`
+        : `<button class="btn btn-ghost" style="font-size:12px;padding:4px 8px;" onclick="showEditCategoryDialog('${escAttr(cat.key)}','${escAttr(cat.icon)}','${escAttr(cat.label)}')">✏️</button>
+           <button class="btn btn-ghost" style="font-size:12px;padding:4px 8px;color:var(--danger);" onclick="handleDeleteCategory('${escAttr(cat.key)}')">🗑️</button>`
       }
     </div>`;
   }).join('');
@@ -2803,11 +3331,13 @@ function closeCatDialog() {
   editingCategoryKey = null;
 }
 
-function handleAddCategory() {
+async function handleAddCategory() {
   const icon = document.getElementById('newCatIcon').value;
   const label = document.getElementById('newCatLabel').value.trim();
   if (!label) { showToast('请输入分类名称'); return; }
-  addCustomCategory(icon, label);
+  if (label.length > 10) { showToast('分类名称不能超过10字'); return; }
+  const key = await addCustomCategory(icon, label);
+  if (!key) return;
   closeCatDialog();
   renderCategoryList();
   renderCatFilter();
@@ -2815,21 +3345,23 @@ function handleAddCategory() {
   showToast('分类已添加');
 }
 
-function handleEditCategory() {
+async function handleEditCategory() {
   if (!editingCategoryKey) return;
   const icon = document.getElementById('newCatIcon').value;
   const label = document.getElementById('newCatLabel').value.trim();
   if (!label) { showToast('请输入分类名称'); return; }
-  editCustomCategory(editingCategoryKey, icon, label);
+  if (label.length > 10) { showToast('分类名称不能超过10字'); return; }
+  await editCustomCategory(editingCategoryKey, icon, label);
   closeCatDialog();
   renderCategoryList();
   renderCatFilter();
   showToast('分类已更新');
 }
 
-function handleDeleteCategory(key) {
-  if (!confirm('确定删除该分类吗？')) return;
-  deleteCustomCategory(key);
+async function handleDeleteCategory(key) {
+  const ok = await showConfirmDialog('删除分类', '删除分类后，已使用该分类的物品将显示为"其他"。确定删除吗？', '删除');
+  if (!ok) return;
+  await deleteCustomCategory(key);
   renderCategoryList();
   renderCatFilter();
   showToast('分类已删除');
@@ -2874,12 +3406,52 @@ function updateUserInfo() {
 
 // ---------- PWA：注册 Service Worker ----------
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js').then(() => {
-    console.log('[SW] 注册成功');
+  // 用 cache-busting 参数确保拿到最新版本（开发期友好）
+  const swUrl = './sw.js?v=v8_' + Date.now();
+  navigator.serviceWorker.register(swUrl).then((reg) => {
+    console.log('[SW] 注册成功，scope:', reg.scope);
+    // 监听更新
+    reg.addEventListener('updatefound', () => {
+      const nw = reg.installing;
+      if (!nw) return;
+      nw.addEventListener('statechange', () => {
+        if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+          // 新版本已安装，提示用户刷新
+          console.log('[SW] 新版本已下载，刷新页面生效');
+        }
+      });
+    });
   }).catch(err => {
     console.warn('[SW] 注册失败', err);
   });
 }
+
+// ---------- 键盘可访问性：ESC 关闭抽屉 ----------
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  // 优先关闭最上层的自定义弹窗
+  const customDialogs = document.querySelectorAll('.overlay.show');
+  if (customDialogs.length > 0) {
+    const top = customDialogs[customDialogs.length - 1];
+    if (top.id === 'catDialog') {
+      top.remove();
+      editingCategoryKey = null; // 重置分类编辑状态
+    } else if (top.id === 'addFloorDialog' || top.id === 'appSkeleton') {
+      top.remove();
+    } else if (top.id === 'overlay') {
+      closeDrawer();
+    } else if (top.id === 'detailOverlay') {
+      closeDetail();
+    } else if (top.id === 'categoryOverlay') {
+      closeCategoryManager();
+    } else if (top.id === 'familyOverlay') {
+      closeFamilyModal();
+    } else {
+      // 自定义弹窗（确认/输入/加入家庭组）
+      top.remove();
+    }
+  }
+});
 
 // ---------- PWA：安装提示 ----------
 let deferredPrompt = null;

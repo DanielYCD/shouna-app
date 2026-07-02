@@ -20,5 +20,25 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "户型图",
+      "short_name": "户型图",
+      "url": "./index.html#map",
+      "description": "查看家庭户型图"
+    },
+    {
+      "name": "搜索物品",
+      "short_name": "搜索",
+      "url": "./index.html#search",
+      "description": "快速搜索物品"
+    },
+    {
+      "name": "添加物品",
+      "short_name": "添加",
+      "url": "./index.html#add",
+      "description": "添加新物品"
+    }
   ]
 }
