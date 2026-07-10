@@ -1,0 +1,91 @@
+.floor-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 16rpx;
+}
+.floor-tab {
+  padding: 12rpx 28rpx;
+  background: #fff;
+  border-radius: 999rpx;
+  font-size: 26rpx;
+  margin: 0 16rpx 16rpx 0;
+  color: #666;
+}
+.floor-tab.active {
+  background: #CC1414;
+  color: #fff;
+}
+.floor-tab.add {
+  background: #f2f2f2;
+  color: #999;
+}
+.img-wrap {
+  position: relative;
+  background: #fff;
+  border-radius: 16rpx;
+  overflow: hidden;
+  margin-bottom: 16rpx;
+}
+.floor-img {
+  width: 100%;
+  display: block;
+}
+.marker {
+  position: absolute;
+  width: 28rpx;
+  height: 28rpx;
+  margin-left: -14rpx;
+  margin-top: -14rpx;
+  background: #CC1414;
+  border: 4rpx solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.3);
+}
+.toolbar {
+  display: flex;
+  margin-bottom: 16rpx;
+}
+.tbtn {
+  flex: 1;
+  margin-right: 16rpx;
+  text-align: center;
+  padding: 18rpx 0;
+  font-size: 28rpx;
+}
+.tbtn:last-child {
+  margin-right: 0;
+}
+.btn-del {
+  background: #fff;
+  color: #e54d42;
+  border: 1rpx solid #e54d42;
+  border-radius: 12rpx;
+}
+.item-list {
+  margin-top: 12rpx;
+  max-height: 360rpx;
+  overflow-y: auto;
+}
+.pick-item {
+  padding: 20rpx;
+  border-bottom: 1rpx solid #f2f2f2;
+  font-size: 28rpx;
+}
+.pick-item.active {
+  background: #fff0f0;
+  color: #CC1414;
+  font-weight: 600;
+}
+.empty {
+  text-align: center;
+  padding: 120rpx 0;
+}
+.empty-ic {
+  font-size: 80rpx;
+  color: #ccc;
+}
+.empty-btn {
+  display: inline-block;
+  margin-top: 24rpx;
+  padding: 18rpx 48rpx;
+}

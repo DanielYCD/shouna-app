@@ -1,0 +1,56 @@
+.fam-switch {
+  display: flex;
+  justify-content: space-between;
+  padding: 22rpx 0;
+  border-bottom: 1rpx solid #f2f2f2;
+  font-size: 28rpx;
+}
+.fam-switch.active {
+  color: #CC1414;
+  font-weight: 600;
+}
+.invite {
+  align-items: center;
+}
+.invite-code {
+  font-size: 48rpx;
+  font-weight: 700;
+  letter-spacing: 8rpx;
+  color: #CC1414;
+  margin-top: 6rpx;
+}
+.copy {
+  padding: 12rpx 36rpx;
+}
+.member {
+  display: flex;
+  justify-content: space-between;
+  padding: 16rpx 0;
+  border-bottom: 1rpx solid #f2f2f2;
+  font-size: 28rpx;
+}
+.member:last-child {
+  border-bottom: none;
+}
+.add-cat {
+  display: inline-block;
+  margin-top: 16rpx;
+  padding: 10rpx 28rpx;
+}
+.act {
+  margin-bottom: 16rpx;
+  width: 100%;
+}
+.btn-del {
+  background: #fff;
+  color: #e54d42;
+  border: 1rpx solid #e54d42;
+  border-radius: 12rpx;
+  font-size: 30rpx;
+  padding: 18rpx 0;
+  text-align: center;
+}
+.center {
+  text-align: center;
+  padding: 24rpx 0;
+}

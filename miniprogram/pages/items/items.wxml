@@ -1,0 +1,36 @@
+<view class="wrap">
+  <view class="search-bar">
+    <input class="search-input" placeholder="搜索物品名称" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" />
+    <view class="add-btn" bindtap="goAdd">＋</view>
+  </view>
+
+  <scroll-view scroll-x class="cat-scroll" wx:if="{{categories.length}}">
+    <view
+      wx:for="{{categories}}"
+      wx:key="*this"
+      class="tag {{activeCat === item ? 'active' : ''}}"
+      data-cat="{{item}}"
+      bindtap="onCat"
+    >{{item === 'all' ? '全部' : item}}</view>
+  </scroll-view>
+
+  <view class="count muted">共 {{total}} 件</view>
+
+  <view wx:if="{{items.length === 0 && !loading}}" class="empty">
+    <view class="empty-ic">📦</view>
+    <view class="muted">没有找到物品</view>
+  </view>
+
+  <view wx:for="{{items}}" wx:key="_id" class="item card" data-id="{{item._id}}" bindtap="openItem">
+    <image wx:if="{{item.photoFileId}}" class="thumb" src="{{item.photoFileId}}" mode="aspectFill"></image>
+    <view wx:else class="thumb thumb-empty">{{item.category}}</view>
+    <view class="item-main">
+      <view class="title" style="font-size:30rpx;">{{item.name}}</view>
+      <view class="muted">{{item.category}}<text wx:if="{{item.quantity}}"> · ×{{item.quantity}}</text></view>
+      <view wx:if="{{item.note}}" class="muted note">{{item.note}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="muted" style="text-align:center;padding:20rpx;">加载中…</view>
+  <view wx:if="{{!hasMore && items.length}}" class="muted" style="text-align:center;padding:20rpx;">没有更多了</view>
+</view>

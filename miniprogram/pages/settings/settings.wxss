@@ -1,0 +1,11 @@
+.act {
+  width: 100%;
+  text-align: center;
+  padding: 18rpx 0;
+  font-size: 28rpx;
+}
+.center {
+  text-align: center;
+  padding: 24rpx 0;
+  line-height: 1.6;
+}

@@ -1,0 +1,33 @@
+<view class="page">
+  <view class="card">
+    <view class="card-title">当前账号</view>
+    <view class="row-between">
+      <text class="muted">微信身份(openid)</text>
+      <text class="primary" bindtap="copyOpenid">{{maskedOpenid}} ⧉</text>
+    </view>
+    <view class="divider"></view>
+    <view class="row-between">
+      <text class="muted">当前家庭</text>
+      <text>{{familyName}}</text>
+    </view>
+    <view class="divider"></view>
+    <view class="row-between">
+      <text class="muted">物品总数</text>
+      <text>{{itemCount}} 件</text>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">数据</view>
+    <view class="btn-ghost act" bindtap="exportData">导出当前家庭数据</view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">关于</view>
+    <view class="muted" style="line-height:1.6;">家居收纳管家 · 小程序版</view>
+    <view class="muted" style="line-height:1.6;">微信打开即自动登录，数据存于腾讯云开发，家人通过邀请码共享。</view>
+    <view class="btn-ghost act" style="margin-top:16rpx;" bindtap="goPwa">网页版地址（复制）</view>
+  </view>
+
+  <view class="muted center">数据互通说明：网页版(PWA)仍使用独立账号体系，与小程序数据暂不互通。</view>
+</view>

@@ -1,0 +1,75 @@
+.wrap {
+  padding: 20rpx 24rpx;
+  box-sizing: border-box;
+}
+.search-bar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+.search-input {
+  flex: 1;
+  background: #fff;
+  border-radius: 999rpx;
+  padding: 16rpx 28rpx;
+  font-size: 28rpx;
+}
+.add-btn {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: #CC1414;
+  color: #fff;
+  font-size: 44rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 16rpx;
+  flex-shrink: 0;
+}
+.cat-scroll {
+  white-space: nowrap;
+  margin-bottom: 8rpx;
+}
+.count {
+  margin: 8rpx 4rpx 16rpx;
+}
+.item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16rpx;
+  padding: 20rpx;
+}
+.thumb {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 12rpx;
+  margin-right: 20rpx;
+  flex-shrink: 0;
+}
+.thumb-empty {
+  background: #f2f2f2;
+  color: #999;
+  font-size: 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.item-main {
+  flex: 1;
+  min-width: 0;
+}
+.note {
+  margin-top: 6rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.empty {
+  text-align: center;
+  padding: 100rpx 0;
+}
+.empty-ic {
+  font-size: 80rpx;
+  margin-bottom: 16rpx;
+}

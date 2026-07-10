@@ -1,0 +1,59 @@
+<view class="page">
+  <view class="floor-tabs">
+    <view
+      wx:for="{{floors}}"
+      wx:key="_id"
+      class="floor-tab {{activeFloorId === item._id ? 'active' : ''}}"
+      data-id="{{item._id}}"
+      bindtap="selectFloor"
+    >{{item.name}}</view>
+    <view class="floor-tab add" bindtap="addFloor">＋</view>
+  </view>
+
+  <block wx:if="{{activeFloor}}">
+    <view class="img-wrap">
+      <image
+        id="floorImg"
+        class="floor-img"
+        src="{{activeFloor.imageFileId}}"
+        mode="widthFix"
+        bindtap="onImageTap"
+      ></image>
+      <view
+        wx:for="{{markers}}"
+        wx:key="_id"
+        class="marker"
+        style="left:{{item.location.x * 100}}%; top:{{item.location.y * 100}}%;"
+        data-name="{{item.name}}"
+        bindtap="onMarkerTap"
+      ></view>
+    </view>
+
+    <view class="toolbar">
+      <view wx:if="{{!marking}}" class="btn-primary tbtn" bindtap="startMark">标记物品</view>
+      <view wx:if="{{!marking}}" class="btn-ghost tbtn" bindtap="renameFloor">改名</view>
+      <view wx:if="{{!marking}}" class="btn-del tbtn" bindtap="delFloor">删除楼层</view>
+      <view wx:if="{{marking}}" class="btn-primary tbtn" bindtap="cancelMark">取消标记</view>
+    </view>
+
+    <view wx:if="{{marking}}" class="card">
+      <view class="card-title">选择要标记的物品</view>
+      <view class="muted" wx:if="{{markingItem}}">已选：{{markingItem.name}}（点击户型图放置）</view>
+      <view class="item-list">
+        <view
+          wx:for="{{items}}"
+          wx:key="_id"
+          class="pick-item {{markingItem && markingItem._id === item._id ? 'active' : ''}}"
+          data-id="{{item._id}}"
+          bindtap="pickItem"
+        >{{item.name}}</view>
+      </view>
+    </view>
+  </block>
+
+  <view wx:else class="empty">
+    <view class="empty-ic">⌖</view>
+    <view class="muted">还没有户型图</view>
+    <view class="btn-primary empty-btn" bindtap="addFloor">添加户型图</view>
+  </view>
+</view>
