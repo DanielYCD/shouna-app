@@ -6,6 +6,7 @@ Page({
     families: [],
     currentFamilyId: '',
     current: null,
+    isOwner: false,
     members: [],
     inviteCode: '',
     maskedOpenid: ''
@@ -24,6 +25,7 @@ Page({
       currentFamilyId: app.globalData.currentFamilyId,
       maskedOpenid: maskOpenid(app.globalData.openid),
       current: cur,
+      isOwner: !!(cur && cur.ownerOpenid === app.globalData.openid),
       inviteCode: cur ? cur.inviteCode : ''
     })
     if (cur) this.loadMembers(cur._id)

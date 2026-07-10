@@ -1,5 +1,4 @@
 {
   "navigationBarTitleText": "物品",
-  "enablePullDownRefresh": true,
-  "onReachBottom": true
+  "enablePullDownRefresh": true
 }
